@@ -21,7 +21,18 @@ if (!process.argv.includes('--local')) {
   if (!allowedRoutes.length || allowedRoutes.some((route) => typeof route !== 'string' || !ROUTE.test(route))) {
     throw new Error('aleph.config.json의 allowedRoutes를 "메서드 /경로" 모양으로 하나 이상 적어 주세요.');
   }
+  // 5단계: 심판이 직접 요청을 시험할 원본 자료 주소도 함께 기록합니다. 쿼리 없는 HTTPS 경로만 받습니다.
+  let originalApiUrl = null;
+  if (config.originalApiUrl != null) {
+    let url;
+    try { url = new URL(config.originalApiUrl); } catch { url = null; }
+    if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+        || url.href !== config.originalApiUrl) {
+      throw new Error('aleph.config.json의 originalApiUrl은 쿼리·비밀값 없는 HTTPS 경로여야 합니다.');
+    }
+    originalApiUrl = url.href;
+  }
   await writeFile(resolve(root, 'public', 'aleph.json'),
-    `${JSON.stringify({ ...identity, allowedRoutes }, null, 2)}\n`, 'utf8');
-  console.log(`배포 저장소·커밋·주소와 허용 경로 ${allowedRoutes.length}개를 public/aleph.json에 기록했습니다.`);
+    `${JSON.stringify({ ...identity, allowedRoutes, originalApiUrl }, null, 2)}\n`, 'utf8');
+  console.log(`배포 저장소·커밋·주소, 허용 경로 ${allowedRoutes.length}개, 원본 주소를 public/aleph.json에 기록했습니다.`);
 }
