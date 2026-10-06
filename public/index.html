@@ -37,7 +37,7 @@
 </head>
 <body>
   <main>
-    <div class="eyebrow">BYTE BACK · 3단계 진짜 로그인을 붙입니다</div>
+    <div class="eyebrow">BYTE BACK · 4단계 내 메모만 열리게 합니다</div>
     <h1>내 자료실</h1>
     <p>메모는 서버 함수가 학습용 DB에서 읽어 옵니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
 
@@ -53,7 +53,7 @@
       <p class="error" id="auth-error" role="alert"></p>
     </section>
 
-    <div class="notice">서버 함수가 로그인 토큰을 직접 확인하고, 로그인하지 않은 요청은 자료 없이 거부합니다. 다만 아직 메모 한 건을 읽고 고치고 지울 때 주인을 확인하지 않아, 다른 계정도 id만 알면 바꿀 수 있습니다. 이 허점은 다음 단계에서 막습니다.</div>
+    <div class="notice">서버 함수가 로그인 토큰으로 요청한 사람을 확인하고, 메모를 읽고 추가·수정·삭제할 때마다 그 사람이 메모의 주인인지 비교합니다. 로그인하지 않은 요청과 다른 계정의 메모 요청은 자료 없이 거부합니다. DB에서도 RLS로 본인 행만 다루도록 막아 두었습니다.</div>
 
     <section class="editor" id="editor" hidden>
       <h2>새 메모 추가</h2>
