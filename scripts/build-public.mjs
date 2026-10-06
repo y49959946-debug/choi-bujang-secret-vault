@@ -14,7 +14,14 @@ await rm(resolve(root, 'public', 'data.json'), { force: true });
 console.log('정적 data.json은 배포하지 않습니다. 메모는 /api/notes에서 읽습니다.');
 if (!process.argv.includes('--local')) {
   const identity = deploymentIdentity(process.env, config);
+  // 5단계: 심판이 배포본에서 허용 경로를 볼 수 있도록 aleph.config.json의 allowedRoutes를 함께 기록합니다.
+  // 경로 모양("GET /api/notes/:id")만 적고, 키·토큰 같은 값은 넣지 않습니다.
+  const ROUTE = /^(GET|POST|PUT|PATCH|DELETE) \/[A-Za-z0-9_\-/:.]*$/u;
+  const allowedRoutes = Array.isArray(config.allowedRoutes) ? config.allowedRoutes : [];
+  if (!allowedRoutes.length || allowedRoutes.some((route) => typeof route !== 'string' || !ROUTE.test(route))) {
+    throw new Error('aleph.config.json의 allowedRoutes를 "메서드 /경로" 모양으로 하나 이상 적어 주세요.');
+  }
   await writeFile(resolve(root, 'public', 'aleph.json'),
-    `${JSON.stringify(identity, null, 2)}\n`, 'utf8');
-  console.log('배포 저장소·커밋·주소를 public/aleph.json에 기록했습니다.');
+    `${JSON.stringify({ ...identity, allowedRoutes }, null, 2)}\n`, 'utf8');
+  console.log(`배포 저장소·커밋·주소와 허용 경로 ${allowedRoutes.length}개를 public/aleph.json에 기록했습니다.`);
 }
