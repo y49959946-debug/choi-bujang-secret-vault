@@ -10,8 +10,20 @@
     main { max-width: 760px; margin: 0 auto; padding: 44px 22px 64px; }
     .eyebrow { color: #8ad8df; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
     h1 { margin: 16px 0; font-size: clamp(30px, 7vw, 48px); line-height: 1.2; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
     p { font-size: 17px; line-height: 1.7; color: #bfd0e5; }
     .notice { margin: 26px 0; padding: 18px; border: 1px solid #d07384; border-radius: 14px; color: #ffe3e8; background: #612a3544; }
+    .auth { margin: 26px 0; padding: 18px 19px; border: 1px solid #51667c; border-radius: 14px; background: #16253a; }
+    .auth[data-state="in"] { border-color: #4fb39a; }
+    .status { margin: 0 0 14px; font-size: 16px; color: #ecf4ff; }
+    form { display: grid; gap: 10px; }
+    label { display: grid; gap: 4px; font-size: 14px; color: #bfd0e5; }
+    input { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #51667c; background: #0c1522; color: #ecf4ff; }
+    button { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 10px; border: 0; background: #8ad8df; color: #0c1522; cursor: pointer; justify-self: start; }
+    button:disabled { opacity: .6; cursor: progress; }
+    .error { margin: 10px 0 0; color: #ffb4c0; font-size: 15px; }
+    .error:empty { display: none; }
+    [hidden] { display: none !important; }
     ul { list-style: none; display: grid; gap: 12px; padding: 0; }
     li { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; }
     strong { display: block; font-size: 18px; margin-bottom: 5px; }
@@ -20,13 +32,108 @@
 </head>
 <body>
   <main>
-    <div class="eyebrow">BYTE BACK · 2단계 자료를 코드 밖으로</div>
+    <div class="eyebrow">BYTE BACK · 3단계 진짜 로그인을 붙입니다</div>
     <h1>내 자료실</h1>
-    <p>메모는 이제 정적 파일이 아니라 서버 함수가 학습용 DB에서 읽어 옵니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
-    <div class="notice">아직 서버 함수에 로그인 확인이 없어 누구나 /api/notes를 부를 수 있습니다. 다음 단계에서 이 접근을 막습니다.</div>
+    <p>메모는 서버 함수가 학습용 DB에서 읽어 옵니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
+
+    <section class="auth" id="auth" data-state="loading" aria-live="polite">
+      <h2>로그인</h2>
+      <p class="status" id="auth-status">로그인 상태를 확인하는 중입니다.</p>
+      <form id="login-form" hidden>
+        <label>이메일 <input id="email" type="email" autocomplete="username" required></label>
+        <label>비밀번호 <input id="password" type="password" autocomplete="current-password" required></label>
+        <button id="login-button" type="submit">로그인</button>
+      </form>
+      <button id="logout-button" type="button" hidden>로그아웃</button>
+      <p class="error" id="auth-error" role="alert"></p>
+    </section>
+
+    <div class="notice">로그인 화면은 붙였지만 아직 서버 함수는 로그인 여부를 확인하지 않아 누구나 /api/notes를 부를 수 있습니다. 서버가 신원을 확인하는 일은 다음 제작에서 붙입니다.</div>
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
+    // 공식 Supabase JS SDK. 버전을 고정해 받습니다.
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
+
+    // 공개용 값만 둡니다. 서버 전용 키(sb_secret_…)는 절대 이 파일에 넣지 않습니다.
+    const SUPABASE_URL = 'https://yakpkxozjfwnflpizavj.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_V5VlfcGTbZMcpuwAZlaKyA_vWw6O-lr';
+
+    const box = document.querySelector('#auth');
+    const statusText = document.querySelector('#auth-status');
+    const form = document.querySelector('#login-form');
+    const loginButton = document.querySelector('#login-button');
+    const logoutButton = document.querySelector('#logout-button');
+    const errorText = document.querySelector('#auth-error');
+
+    function showError(message) { errorText.textContent = message; }
+
+    function loginFailureReason(error) {
+      const raw = error?.message ?? '';
+      if (error?.code === 'invalid_credentials' || /invalid login credentials/i.test(raw)) {
+        return '이메일 또는 비밀번호가 맞지 않습니다.';
+      }
+      if (error?.code === 'email_not_confirmed' || /email not confirmed/i.test(raw)) {
+        return '이메일 인증이 끝나지 않은 계정입니다. Supabase에서 계정을 확인 처리해 주세요.';
+      }
+      if (error?.status === 429 || /rate limit/i.test(raw)) {
+        return '시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요.';
+      }
+      if (error?.name === 'AuthRetryableFetchError' || /fetch/i.test(raw)) {
+        return '로그인 서버에 연결하지 못했습니다. 네트워크를 확인해 주세요.';
+      }
+      return `로그인하지 못했습니다. (${raw || '알 수 없는 오류'})`;
+    }
+
+    function render(session) {
+      const user = session?.user;
+      box.dataset.state = user ? 'in' : 'out';
+      statusText.textContent = user
+        ? `${user.email} 계정으로 로그인했습니다.`
+        : '로그인하지 않았습니다.';
+      form.hidden = Boolean(user);
+      logoutButton.hidden = !user;
+    }
+
+    let supabase = null;
+    if (SUPABASE_PUBLISHABLE_KEY.startsWith('여기에')) {
+      box.dataset.state = 'out';
+      statusText.textContent = '로그인을 쓸 수 없습니다.';
+      showError('index.html의 SUPABASE_PUBLISHABLE_KEY 자리에 publishable key를 넣어 주세요.');
+    } else {
+      supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+      supabase.auth.onAuthStateChange((_event, session) => render(session));
+      const { data } = await supabase.auth.getSession();
+      render(data.session);
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!supabase) return;
+      showError('');
+      loginButton.disabled = true;
+      try {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: document.querySelector('#email').value.trim(),
+          password: document.querySelector('#password').value,
+        });
+        if (error) showError(loginFailureReason(error));
+        else document.querySelector('#password').value = '';
+      } finally {
+        loginButton.disabled = false;
+      }
+    });
+
+    logoutButton.addEventListener('click', async () => {
+      if (!supabase) return;
+      showError('');
+      logoutButton.disabled = true;
+      const { error } = await supabase.auth.signOut();
+      logoutButton.disabled = false;
+      if (error) showError(`로그아웃하지 못했습니다. (${error.message})`);
+    });
+
+    // 메모 목록은 2단계와 같이 /api/notes에서 읽습니다.
     const list = document.querySelector('#notes');
     try {
       const response = await fetch('/api/notes', { cache: 'no-store' });
