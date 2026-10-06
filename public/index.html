@@ -27,7 +27,12 @@
     ul { list-style: none; display: grid; gap: 12px; padding: 0; }
     li { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; }
     strong { display: block; font-size: 18px; margin-bottom: 5px; }
-    li span { color: #bfd0e5; }
+    li span { color: #bfd0e5; white-space: pre-wrap; }
+    textarea { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #51667c; background: #0c1522; color: #ecf4ff; min-height: 70px; resize: vertical; }
+    .editor { margin: 26px 0 12px; padding: 18px 19px; border: 1px solid #51667c; border-radius: 14px; background: #16253a; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .ghost { background: transparent; color: #8ad8df; border: 1px solid #51667c; }
+    .danger { background: #d07384; color: #1a0d12; }
   </style>
 </head>
 <body>
@@ -48,7 +53,17 @@
       <p class="error" id="auth-error" role="alert"></p>
     </section>
 
-    <div class="notice">서버 함수가 로그인 토큰을 직접 확인합니다. 로그인하지 않으면 /api/notes는 자료 없이 거부합니다. 다만 아직 로그인한 계정이면 누구의 메모인지 가리지 않고 모두 보입니다. 타인 자료 접근은 다음 단계에서 막습니다.</div>
+    <div class="notice">서버 함수가 로그인 토큰을 직접 확인하고, 로그인하지 않은 요청은 자료 없이 거부합니다. 다만 아직 메모 한 건을 읽고 고치고 지울 때 주인을 확인하지 않아, 다른 계정도 id만 알면 바꿀 수 있습니다. 이 허점은 다음 단계에서 막습니다.</div>
+
+    <section class="editor" id="editor" hidden>
+      <h2>새 메모 추가</h2>
+      <form id="note-form">
+        <label>제목 <input id="note-title" maxlength="120" required></label>
+        <label>내용 <textarea id="note-body" maxlength="2000"></textarea></label>
+        <button id="note-add" type="submit">추가</button>
+      </form>
+      <p class="error" id="note-error" role="alert"></p>
+    </section>
     <ul id="notes" aria-live="polite"><li>로그인 상태를 확인하는 중입니다.</li></ul>
   </main>
   <script type="module">
@@ -67,6 +82,9 @@
     const errorText = document.querySelector('#auth-error');
     const list = document.querySelector('#notes');
     let loadSeq = 0;
+    const editor = document.querySelector('#editor');
+    const noteForm = document.querySelector('#note-form');
+    const noteError = document.querySelector('#note-error');
 
     function showError(message) { errorText.textContent = message; }
 
@@ -137,44 +155,118 @@
       if (error) showError(`로그아웃하지 못했습니다. (${error.message})`);
     });
 
-    // 메모 목록: 로그인 토큰을 Authorization 헤더로 보내고, 서버가 검사합니다.
-    // 토큰은 화면이나 콘솔에 출력하지 않습니다.
+    // 메모 API 도우미: 매번 현재 세션의 토큰을 Authorization 헤더로 보냅니다.
+    // 토큰은 화면이나 콘솔에 출력하지 않습니다. 사용자 ID는 보내지 않습니다(서버가 토큰으로 확인).
+
+    async function api(path, { method = 'GET', body } = {}) {
+      const { data } = supabase ? await supabase.auth.getSession() : { data: {} };
+      const token = data?.session?.access_token;
+      if (!token) throw new Error('로그인이 필요합니다.');
+      const response = await fetch(path, {
+        method, cache: 'no-store',
+        headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (response.status === 401) throw new Error('로그인이 만료되었거나 확인되지 않았습니다. 다시 로그인해 주세요.');
+      if (response.status === 404) throw new Error('메모를 찾을 수 없습니다. 이미 지워졌을 수 있습니다.');
+      if (response.status === 400) throw new Error('제목(120자 이내)과 내용(2000자 이내)을 확인해 주세요.');
+      if (!response.ok) throw new Error('서버에서 요청을 처리하지 못했습니다.');
+      return response.status === 204 ? null : response.json();
+    }
+
     function showMessage(text) {
       const item = document.createElement('li');
       item.textContent = text;
       list.replaceChildren(item);
     }
 
+    function noteItem(note) {
+      const item = document.createElement('li');
+      const view = document.createElement('div');
+      const title = document.createElement('strong');
+      const body = document.createElement('span');
+      title.textContent = note.title;
+      body.textContent = note.body;
+      const actions = document.createElement('div');
+      actions.className = 'row';
+      const editBtn = Object.assign(document.createElement('button'), { type: 'button', textContent: '수정', className: 'ghost' });
+      const delBtn = Object.assign(document.createElement('button'), { type: 'button', textContent: '삭제', className: 'danger' });
+      actions.append(editBtn, delBtn);
+      view.append(title, body, actions);
+
+      const form = document.createElement('form');
+      form.hidden = true;
+      const tIn = Object.assign(document.createElement('input'), { value: note.title, maxLength: 120, required: true });
+      const bIn = Object.assign(document.createElement('textarea'), { value: note.body, maxLength: 2000 });
+      const formActions = document.createElement('div');
+      formActions.className = 'row';
+      const saveBtn = Object.assign(document.createElement('button'), { type: 'submit', textContent: '저장' });
+      const cancelBtn = Object.assign(document.createElement('button'), { type: 'button', textContent: '취소', className: 'ghost' });
+      formActions.append(saveBtn, cancelBtn);
+      const tLabel = document.createElement('label'); tLabel.append('제목 ', tIn);
+      const bLabel = document.createElement('label'); bLabel.append('내용 ', bIn);
+      form.append(tLabel, bLabel, formActions);
+
+      const err = Object.assign(document.createElement('p'), { className: 'error' });
+      item.append(view, form, err);
+
+      editBtn.addEventListener('click', () => { view.hidden = true; form.hidden = false; err.textContent = ''; });
+      cancelBtn.addEventListener('click', () => { form.hidden = true; view.hidden = false; err.textContent = ''; });
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        saveBtn.disabled = true; err.textContent = '';
+        try {
+          const saved = await api(`/api/notes/${encodeURIComponent(note.id)}`, { method: 'PUT', body: { title: tIn.value, body: bIn.value } });
+          item.replaceWith(noteItem(saved));
+        } catch (error) { err.textContent = error.message; }
+        finally { saveBtn.disabled = false; }
+      });
+      delBtn.addEventListener('click', async () => {
+        delBtn.disabled = true; err.textContent = '';
+        try {
+          await api(`/api/notes/${encodeURIComponent(note.id)}`, { method: 'DELETE' });
+          item.remove();
+          if (!list.children.length) showMessage('아직 메모가 없습니다. 위에서 추가해 보세요.');
+        } catch (error) { err.textContent = error.message; delBtn.disabled = false; }
+      });
+      return item;
+    }
+
     async function loadNotes(session) {
       const seq = ++loadSeq;
+      editor.hidden = !session?.access_token;
+      noteError.textContent = '';
       if (!session?.access_token) {
         showMessage('로그인하면 메모가 보입니다.');
         return;
       }
       showMessage('가상 자료를 불러오는 중입니다.');
       try {
-        const response = await fetch('/api/notes', {
-          cache: 'no-store',
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
+        const notes = await api('/api/notes');
         if (seq !== loadSeq) return;
-        if (response.status === 401) throw new Error('로그인이 만료되었거나 확인되지 않았습니다. 다시 로그인해 주세요.');
-        if (!response.ok) throw new Error('서버에서 자료를 읽을 수 없습니다.');
-        const data = await response.json();
-        if (!Array.isArray(data.notes)) throw new Error('자료 형식이 맞지 않습니다.');
-        list.replaceChildren(...data.notes.map(note => {
-          const item = document.createElement('li');
-          const title = document.createElement('strong');
-          const content = document.createElement('span');
-          title.textContent = note.title;
-          content.textContent = note.content;
-          item.append(title, content);
-          return item;
-        }));
+        if (!Array.isArray(notes)) throw new Error('자료 형식이 맞지 않습니다.');
+        if (!notes.length) showMessage('아직 메모가 없습니다. 위에서 추가해 보세요.');
+        else list.replaceChildren(...notes.map(noteItem));
       } catch (error) {
         if (seq === loadSeq) showMessage(error.message);
       }
     }
+
+    noteForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const addBtn = document.querySelector('#note-add');
+      const title = document.querySelector('#note-title');
+      const body = document.querySelector('#note-body');
+      addBtn.disabled = true; noteError.textContent = '';
+      try {
+        const { id } = await api('/api/notes', { method: 'POST', body: { title: title.value, body: body.value } });
+        const saved = await api(`/api/notes/${encodeURIComponent(id)}`);
+        if (list.firstElementChild && !list.querySelector('strong')) list.replaceChildren();
+        list.append(noteItem(saved));
+        title.value = ''; body.value = '';
+      } catch (error) { noteError.textContent = error.message; }
+      finally { addBtn.disabled = false; }
+    });
   </script>
 </body>
 </html>
