@@ -2,14 +2,20 @@
   "schema": "byteback.xdr.patterns.v1",
   "moduleKey": "web-injection",
   "basis": "MITRE ATT&CK T1190 Exploit Public-Facing Application (https://attack.mitre.org/techniques/T1190/) + 약점 분류 MITRE CWE",
-  "note": "알려진 공격 형태만 적습니다. 막을지 알릴지를 정하는 기준 숫자는 decide.mjs에서 정합니다. 이 파일에는 실제 공격 문자열을 적지 않고, 경보 원본도 고치지 않습니다. T1190 페이지는 스크립트 주입을 직접 말하지 않아 CWE-79를 함께 근거로 듭니다.",
+  "note": "알려진 공격 형태만 적습니다. 막을지 알릴지를 정하는 기준 숫자는 decide.mjs에서 정합니다. 이 파일에는 실제 공격 문자열을 적지 않고, 경보 원본도 고치지 않습니다. T1190 페이지는 스크립트 주입을 직접 말하지 않아 CWE-79를 함께 근거로 듭니다. 경보에 명령 구분자 표기의 반복(같은 주소 11번)이 있어, 네 번째 패턴(CWE-78)을 근거와 함께 추가했습니다.",
   "patterns": [
     {
       "id": "wi.sql_in_request",
       "name": "요청 인자 안의 SQL 구문",
       "technique": "T1190",
       "weakness": "CWE-89",
-      "fields": ["data.url", "data.srcip", "data.count", "rule.level", "rule.description"],
+      "fields": [
+        "data.url",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
       "condition": "요청 인자에 SQL 구문을 이어 붙인 표기가 있고, 같은 data.srcip에서 반복된다(설명의 'SQL 구문'·'데이터베이스 조회를 이어 붙이는 표기', data.count).",
       "evidence": "T1190 사례에 공개 웹·DB 서버를 노린 SQL 주입이 있다(\"used SQL injection to compromise publicly exposed web and database servers\", https://attack.mitre.org/techniques/T1190/), 약점 분류 CWE-89 SQL Injection(https://cwe.mitre.org/data/definitions/89.html)."
     },
@@ -18,7 +24,13 @@
       "name": "요청 인자 안의 스크립트 태그",
       "technique": "T1190",
       "weakness": "CWE-79",
-      "fields": ["data.url", "data.srcip", "data.count", "rule.level", "rule.description"],
+      "fields": [
+        "data.url",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
       "condition": "요청 인자에 스크립트 태그 삽입 표기가 있고, 같은 data.srcip에서 반복된다(설명의 '스크립트 삽입 표기'·'스크립트 표식', data.count).",
       "evidence": "T1190 탐지 안내는 접근 로그의 공격형 입력을 본다(\"exploit-like inputs\", https://attack.mitre.org/techniques/T1190/), 스크립트 삽입은 약점 분류 CWE-79 Cross-site Scripting(https://cwe.mitre.org/data/definitions/79.html)."
     },
@@ -27,9 +39,30 @@
       "name": "경로 거슬러 올라가기(../) 반복",
       "technique": "T1190",
       "weakness": "CWE-22",
-      "fields": ["data.url", "data.srcip", "data.count", "rule.level", "rule.description"],
+      "fields": [
+        "data.url",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
       "condition": "요청 경로에 상위 폴더로 거슬러 올라가는 표기(../)가 여러 단계 들어 있고, 같은 data.srcip에서 반복된다(설명의 '경로를 여러 단계 거슬러 올라가는 표기'·'경로 이탈 표기', data.count).",
       "evidence": "T1190 사례에 초기 접근을 위한 디렉터리 이동 취약점 악용이 있다(\"directory traversal vulnerabilities to gain initial access\", https://attack.mitre.org/techniques/T1190/), 약점 분류 CWE-22 Path Traversal(https://cwe.mitre.org/data/definitions/22.html)."
+    },
+    {
+      "id": "wi.command_separator_in_request",
+      "name": "요청 인자 안의 명령 구분자",
+      "technique": "T1190",
+      "weakness": "CWE-78",
+      "fields": [
+        "data.url",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
+      "condition": "요청 인자에 운영체제 명령을 이어 붙이는 구분자 표기가 있고, 같은 data.srcip에서 연속 요청으로 반복된다(설명의 '명령 구분자 표기', data.count).",
+      "evidence": "T1190 탐지 안내는 접근 로그의 공격형 입력을 본다(\"exploit-like inputs\", https://attack.mitre.org/techniques/T1190/), 명령 구분자 삽입은 약점 분류 CWE-78 OS Command Injection(https://cwe.mitre.org/data/definitions/78.html)."
     }
   ]
 }
