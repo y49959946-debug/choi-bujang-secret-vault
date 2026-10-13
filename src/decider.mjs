@@ -103,8 +103,9 @@ function freshlyVerified(request) {
 //   /notes/export 같은 요청도 기능이 아니라 'export'라는 ID의 메모 한 건으로만 다뤄집니다.
 // - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
 //   강사 공지 구역은 읽기·수정 모두 거부합니다(저장된 강사 권한과 공지 API가 아직 없습니다).
-// - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
-//   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
+// - 계약에 메모 주인 칸은 없지만, 엔진이 확인한 주체(subjectId)와 정확한 경로(path)는 있습니다.
+//   그래서 메모 한 건 경로(/notes/:id)를 처음 허용받은 주체에 묶고, 다른 주체가 같은 정확한 경로를 쓰면 거부합니다.
+//   (같은 반·프로젝트 안에서만 비교합니다. 자료 API의 owner_id 검사도 그대로 한 번 더 막습니다.)
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 // 엔진이 확인한 주체·기기: subjectId는 공백 없는 가명 ID, deviceId는 16자리 소문자 16진수입니다.
 // 둘 중 하나라도 없거나 모양이 틀리면, 누구의 어느 기기인지 모르는 요청이므로 구역에 들이지 않습니다.
@@ -119,6 +120,25 @@ const ZONE_ROUTES = Object.freeze({
   'PUT /notes/:id': 'owner_notes',
   'DELETE /notes/:id': 'owner_notes',
 });
+
+// 메모 한 건 경로 → 처음 허용받은 주체. 판정기가 켜져 있는 동안만 기억하며, 개수를 제한합니다.
+// 메모 본문·토큰은 담지 않고, 반·프로젝트·경로와 가명 주체 ID만 담습니다.
+const NOTE_OWNERS = new Map();
+const NOTE_OWNERS_MAX = 10000;
+const noteKey = (request) => `${ownValue(request, 'classId')}|${ownValue(request, 'projectId')}|${String(ownValue(request, 'path')).toLowerCase()}`;
+const isNoteItem = (request) => / \/notes\/:id$/u.test(ownValue(request, 'route'));
+function otherSubjectsNote(request, subjectId) {
+  if (!isNoteItem(request)) return false;
+  const owner = NOTE_OWNERS.get(noteKey(request));
+  return owner !== undefined && owner !== subjectId;
+}
+function rememberNoteOwner(request, subjectId) {
+  if (!isNoteItem(request)) return;
+  const key = noteKey(request);
+  if (NOTE_OWNERS.has(key)) return;
+  if (NOTE_OWNERS.size >= NOTE_OWNERS_MAX) NOTE_OWNERS.delete(NOTE_OWNERS.keys().next().value);
+  NOTE_OWNERS.set(key, subjectId);
+}
 
 // path → 'GET /notes/:id' 같은 route 모양 (자원 경로가 아니면 null)
 function routeShape(method, path) {
@@ -170,11 +190,16 @@ export async function decide(request) {
   if (zoned?.deny) return respond(request, 'deny', zoned.deny[0], [zoned.deny[1]]);
 
   if (zoned?.zone) {
+    // 8단계: 다른 주체에게 이미 묶인 메모 한 건 경로면 거부합니다.
+    if (otherSubjectsNote(request, subjectId)) {
+      return respond(request, 'deny', 'zone_not_allowed', ['owner_notes_zone']);
+    }
     // 7단계: 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
     if (unusualAccess(readAccessContext(request)) && !freshlyVerified(request)) {
       return respond(request, 'step_up', 'step_up_required', ['step_up_required']);
     }
     const zoneRule = zoned.zone === 'owner_notes' ? 'owner_notes_zone' : 'class_notices_zone';
+    rememberNoteOwner(request, subjectId);
     return respond(request, 'allow', 'approved', ['device_registered', zoneRule]);
   }
 
