@@ -24,10 +24,11 @@ const respond = (request, decision, reasonCode, ruleIds) => ({
 // - 그 밖의 출처(브라우저·클라이언트 헤더 등)나 모양이 틀린 값은 신뢰하지 않습니다.
 // 값이 없거나 출처가 불명확하면 null로 둡니다. 'local'·'usual' 같은 정상값으로 채우지 않습니다.
 // 요청 객체 자신이 가진 값만 읽고, 계약에 없는 headers·geo·identity 같은 칸은 읽지 않습니다.
-// 이번에는 입력을 가려 읽기만 하며, 이 결과로 판정을 바꾸는 규칙은 아직 없습니다.
+// 이 결과는 아래 step_up_required 규칙이 씁니다.
+// recentEvents가 계약 한도(12개)를 넘어도 버리거나 자르지 않고 모양이 맞는 사건을 모두 셉니다.
+// (사건을 많이 넣거나 앞에 빈 사건을 채워 대량 읽기를 숨기지 못하게 합니다.)
 const TRUSTED_SIGNAL_SOURCES = new Set(['judge_fixture']);
 const SIGNAL_WORD = /^[a-z][a-z0-9_]{0,31}$/u;
-const MAX_RECENT_EVENTS = 12;
 
 const ownValue = (object, key) => (object !== null && typeof object === 'object' && !Array.isArray(object)
   && Object.hasOwn(object, key) ? object[key] : undefined);
@@ -46,7 +47,7 @@ export function readAccessContext(request) {
   const hour = trusted && Number.isInteger(hourValue) && hourValue >= 0 && hourValue <= 23 ? hourValue : null;
 
   const rawEvents = ownValue(request, 'recentEvents');
-  const recentEvents = Array.isArray(rawEvents) && rawEvents.length <= MAX_RECENT_EVENTS
+  const recentEvents = Array.isArray(rawEvents)
     ? rawEvents.filter((event) => signalWord(ownValue(event, 'kind')) !== null
         && Number.isInteger(ownValue(event, 'ageSeconds')) && ownValue(event, 'ageSeconds') >= 0
         && Number.isInteger(ownValue(event, 'count')) && ownValue(event, 'count') >= 0)
