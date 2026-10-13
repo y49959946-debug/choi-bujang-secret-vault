@@ -6,9 +6,11 @@
 // 미등록(false)이거나 값이 없으면 device_not_registered로 거부합니다.
 // 계약(docs/DECIDER_REQUEST.md)에 있는 deviceRegistered·method만 읽고, request.device 같은 없는 값은 쓰지 않습니다.
 // 읽기가 아닌 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
-export const RULE_IDS = Object.freeze(['starter.deny', 'device_registered', 'step_up_required']);
+export const RULE_IDS = Object.freeze([
+  'starter.deny', 'device_registered', 'step_up_required',
+  'resource_zones', 'owner_notes_zone', 'class_notices_zone',
+]);
 
-const READ_METHODS = new Set(['GET']);
 
 const respond = (request, decision, reasonCode, ruleIds) => ({
   schema: 'aleph.decision.v1',
@@ -91,6 +93,60 @@ function freshlyVerified(request) {
     && age >= 0 && age <= STEP_UP_FRESH_SECONDS;
 }
 
+// 8단계 구역 규칙: 엔진이 확인한 method·path·route와 쿼리 길이만으로 자원 구역을 정합니다.
+// (src/resources.mjs와 같은 규칙입니다. 엔진이 이 파일 하나만 불러와도 동작하도록 import하지 않고 옮겨 적었습니다.)
+// - 허용하는 경로는 아래 표뿐이며, path와 route가 서로 맞아야 합니다. 표에 없거나 어긋나면 거부합니다.
+// - 기능은 쿼리로 고르지 않습니다. 쿼리가 붙은 요청(queryLength > 0)은 거부합니다.
+// - 경로의 마지막 칸은 자료 ID뿐입니다. :id와 같은 깊이에 export 같은 기능 경로를 두지 않으므로,
+//   /notes/export 같은 요청도 기능이 아니라 'export'라는 ID의 메모 한 건으로만 다뤄집니다.
+// - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 강사 공지는 읽기만 되고 수정은 거부합니다.
+// - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
+//   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
+const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/u;
+// 엔진이 확인한 주체·기기: subjectId는 공백 없는 가명 ID, deviceId는 16자리 소문자 16진수입니다.
+// 둘 중 하나라도 없거나 모양이 틀리면, 누구의 어느 기기인지 모르는 요청이므로 구역에 들이지 않습니다.
+const SUBJECT_ID = /^[\x21-\x7e]{1,256}$/u;
+const DEVICE_ID = /^[0-9a-f]{16}$/u;
+const ZONE_ROUTES = Object.freeze({
+  // 내 메모 구역: 읽기·수정(추가·고침·삭제). aleph.config.json의 allowedRoutes와 같은 다섯 경로입니다.
+  // 남의 메모인지는 판정기가 알 수 없으므로, 자료 API(api/notes.js)가 저장된 owner_id로 다시 막습니다.
+  'GET /notes': 'owner_notes',
+  'POST /notes': 'owner_notes',
+  'GET /notes/:id': 'owner_notes',
+  'PUT /notes/:id': 'owner_notes',
+  'DELETE /notes/:id': 'owner_notes',
+  // 강사 공지 구역: 읽기
+  'GET /notices': 'class_notices',
+  'GET /notices/:id': 'class_notices',
+});
+const NOTICE_WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// path → 'GET /notes/:id' 같은 route 모양 (자원 경로가 아니면 null)
+function routeShape(method, path) {
+  if (typeof method !== 'string' || typeof path !== 'string' || path.length > 256) return null;
+  const match = /^\/(notes|notices)(?:\/([^/?#]+))?$/u.exec(path);
+  if (!match) return null;
+  if (match[2] !== undefined && !ITEM_ID.test(match[2])) return null;
+  return `${method} /${match[1]}${match[2] === undefined ? '' : '/:id'}`;
+}
+
+// 구역 판단: { zone } 이거나 { deny: [reasonCode, ruleId] } 이거나 null(이전 규칙에 맡김)
+function zoneFor(request) {
+  const method = ownValue(request, 'method');
+  const path = ownValue(request, 'path');
+  const route = ownValue(request, 'route');
+  const shape = routeShape(method, path);
+  const queryLength = ownValue(request, 'queryLength');
+  if (!shape || shape !== route || queryLength !== 0) {
+    return { deny: ['route_not_allowed', 'resource_zones'] };
+  }
+  if (shape.endsWith(' /notices') || shape.endsWith(' /notices/:id')) {
+    if (NOTICE_WRITE_METHODS.has(method)) return { deny: ['zone_not_allowed', 'class_notices_zone'] };
+  }
+  const zone = ZONE_ROUTES[shape];
+  return zone ? { zone } : null;
+}
+
 export async function decide(request) {
   // 6단계: 등록된 기기가 아니면 다른 판단보다 먼저 거부합니다.
   // 요청 객체 자신이 가진 deviceRegistered만 믿습니다(상속·프로토타입으로 끼워 넣은 값은 무시).
@@ -100,13 +156,27 @@ export async function decide(request) {
     return respond(request, 'deny', 'device_not_registered', ['device_registered']);
   }
 
-  // 등록 기기의 자료실 읽기만 허용합니다.
-  if (READ_METHODS.has(request.method)) {
+  // 8단계: 엔진이 확인한 기기 ID와 주체 ID가 있어야 합니다.
+  const deviceId = ownValue(request, 'deviceId');
+  if (typeof deviceId !== 'string' || !DEVICE_ID.test(deviceId)) {
+    return respond(request, 'deny', 'device_not_registered', ['device_registered']);
+  }
+  const subjectId = ownValue(request, 'subjectId');
+  if (typeof subjectId !== 'string' || !SUBJECT_ID.test(subjectId)) {
+    return respond(request, 'deny', 'route_not_allowed', ['resource_zones']);
+  }
+
+  // 8단계: 엔진이 확인한 경로로 구역을 정합니다. 알 수 없는 경로·쿼리·공지 수정은 여기서 거부합니다.
+  const zoned = zoneFor(request);
+  if (zoned?.deny) return respond(request, 'deny', zoned.deny[0], [zoned.deny[1]]);
+
+  if (zoned?.zone) {
     // 7단계: 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
     if (unusualAccess(readAccessContext(request)) && !freshlyVerified(request)) {
       return respond(request, 'step_up', 'step_up_required', ['step_up_required']);
     }
-    return respond(request, 'allow', 'approved', ['device_registered']);
+    const zoneRule = zoned.zone === 'owner_notes' ? 'owner_notes_zone' : 'class_notices_zone';
+    return respond(request, 'allow', 'approved', ['device_registered', zoneRule]);
   }
 
   // 그 밖의 요청은 시작 틀 기본값대로 거부합니다.
