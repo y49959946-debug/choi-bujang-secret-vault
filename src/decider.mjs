@@ -5,7 +5,7 @@
 // 규칙 순서 (계약 docs/DECIDER_REQUEST.md에 있는 값만 읽습니다. request.device·role 같은 없는 값은 쓰지 않습니다.)
 // 6단계 device_registered: request.deviceRegistered가 true가 아니면 가장 먼저 device_not_registered로 거부합니다.
 // 8단계 resource_zones: 엔진이 확인한 deviceId·subjectId·method·path·route가 맞는 구역 경로만 들입니다.
-//   owner_notes_zone(내 메모 다섯 경로)과 class_notices_zone(공지 읽기)만 허용하고, 공지 수정·알 수 없는 경로는 거부합니다.
+//   owner_notes_zone(내 메모 다섯 경로)만 허용하고, class_notices_zone(강사 공지 구역)·알 수 없는 경로는 거부합니다.
 // 7단계 step_up_required: 허용될 요청이라도 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
 // 그 밖의 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
 export const RULE_IDS = Object.freeze([
@@ -101,7 +101,8 @@ function freshlyVerified(request) {
 // - 기능은 쿼리로 고르지 않습니다. 쿼리가 붙은 요청(queryLength > 0)은 거부합니다.
 // - 경로의 마지막 칸은 자료 ID뿐입니다. :id와 같은 깊이에 export 같은 기능 경로를 두지 않으므로,
 //   /notes/export 같은 요청도 기능이 아니라 'export'라는 ID의 메모 한 건으로만 다뤄집니다.
-// - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 강사 공지는 읽기만 되고 수정은 거부합니다.
+// - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
+//   강사 공지 구역은 읽기·수정 모두 거부합니다(저장된 강사 권한과 공지 API가 아직 없습니다).
 // - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
 //   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -117,11 +118,7 @@ const ZONE_ROUTES = Object.freeze({
   'GET /notes/:id': 'owner_notes',
   'PUT /notes/:id': 'owner_notes',
   'DELETE /notes/:id': 'owner_notes',
-  // 강사 공지 구역: 읽기
-  'GET /notices': 'class_notices',
-  'GET /notices/:id': 'class_notices',
 });
-const NOTICE_WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // path → 'GET /notes/:id' 같은 route 모양 (자원 경로가 아니면 null)
 function routeShape(method, path) {
@@ -143,7 +140,7 @@ function zoneFor(request) {
     return { deny: ['route_not_allowed', 'resource_zones'] };
   }
   if (shape.endsWith(' /notices') || shape.endsWith(' /notices/:id')) {
-    if (NOTICE_WRITE_METHODS.has(method)) return { deny: ['zone_not_allowed', 'class_notices_zone'] };
+    return { deny: ['zone_not_allowed', 'class_notices_zone'] };
   }
   const zone = ZONE_ROUTES[shape];
   return zone ? { zone } : null;
