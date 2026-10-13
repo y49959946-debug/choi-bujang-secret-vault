@@ -158,7 +158,8 @@ export default async function handler(request, response) {
   const resource = resourceFromPath(noteId === null ? '/api/notes' : `/api/notes/${noteId}`);
   if (!resource) return deny(response, 404, 'NOT_FOUND', 'unknown_resource');
   if (resource.zone !== ZONES.OWNER_NOTES) return deny(response, 403, 'ZONE_NOT_ALLOWED', 'zone_mismatch');
-  response.setHeader('X-Resource-Id', resource.resourceId);
+  // 자원 ID 머리말은 본인 자료임을 확인한 성공 응답에만 붙입니다. 거부 응답에는 남의 자원 ID를 되돌려 주지 않습니다.
+  const allow = () => response.setHeader('X-Resource-Id', resource.resourceId);
 
   // 8단계: 본문의 role·zone·강사 표시는 믿지 않고 거부합니다(권한은 서버가 검증한 신원으로만 정합니다).
   if ((method === 'POST' || method === 'PUT') && hasRoleField(readBody(request))) {
@@ -179,6 +180,7 @@ export default async function handler(request, response) {
         const rows = data ?? [];
         const own = rows.filter((row) => row.owner_id === userId);
         if (own.length !== rows.length) console.warn('notes: 거부 owner_mismatch');
+        allow();
         return response.status(200).json(own.map(toNote));
       }
       if (method === 'POST') {
@@ -194,6 +196,7 @@ export default async function handler(request, response) {
           .insert({ public_id: id, owner_id: userId, ...fields });
         if (error?.code === '23505') return fail(response, 409, 'ID_CONFLICT');
         if (error) return dbError(response, error, '추가');
+        allow();
         return response.status(201).json({ id });
       }
       response.setHeader('Allow', 'GET, POST');
@@ -214,6 +217,7 @@ export default async function handler(request, response) {
       if (error) return dbError(response, error, '한 건 조회');
       // 남의 메모는 없는 메모와 똑같이 404로 거부합니다(존재 여부를 드러내지 않음).
       if (!data || data.owner_id !== userId) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
+      allow();
       return response.status(200).json(toNote(data));
     }
 
@@ -233,6 +237,7 @@ export default async function handler(request, response) {
         console.error('notes: 수정 후 소유자 불일치');
         return fail(response, 500, 'NOTES_SERVER_ERROR');
       }
+      allow();
       return response.status(200).json(toNote(data));
     }
 
@@ -241,6 +246,7 @@ export default async function handler(request, response) {
       .delete().eq('public_id', id).eq('owner_id', userId).select('public_id');
     if (error) return dbError(response, error, '삭제');
     if (!data?.length) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
+    allow();
     return response.status(204).end();
   } catch {
     console.error('notes: 서버 오류');

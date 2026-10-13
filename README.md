@@ -119,7 +119,7 @@
 
 ### 8단계 · 자료마다 갈 수 있는 구역을 나눕니다
 
-- **자원 ID:** `src/resources.mjs`가 경로를 구역과 자원 ID로 바꿉니다. 내 메모는 `owner_notes`(`notes`, `note:<id>`), 강사 공지는 `class_notices`(`notices`, `notice:<id>`)입니다. 메모 API는 응답 머리말 `X-Resource-Id`에 자원 ID를 붙입니다.
+- **자원 ID:** `src/resources.mjs`가 경로를 구역과 자원 ID로 바꿉니다. 내 메모는 `owner_notes`(`notes`, `note:<id>`), 강사 공지는 `class_notices`(`notices`, `notice:<id>`)입니다. 메모 API는 본인 자료임을 확인한 성공 응답에만 머리말 `X-Resource-Id`를 붙입니다. 처음 제출(`559442f`)에서는 남의 메모를 404로 거부하면서도 이 머리말에 그 메모의 자원 ID를 돌려줘 심판이 `S08_OTHER_ZONE_ALLOWED`로 거부했고, 거부 응답에서 머리말을 뺐습니다.
 - **판정기 구역 규칙:** `RULE_IDS`에 `resource_zones`·`owner_notes_zone`·`class_notices_zone`을 더했습니다. 엔진이 확인한 `subjectId`·`deviceId`·`method`·`path`·`route`가 맞을 때만 내 메모 다섯 경로(목록·추가·한 건·수정·삭제)와 공지 읽기를 허용합니다. 공지 작성·수정·삭제는 `zone_not_allowed`, 표에 없는 경로·쿼리·path와 route 불일치는 `route_not_allowed`로 거부합니다. 계약에 역할 칸이 없어 모두 일반 학생으로 봅니다. 6·7단계 규칙은 그대로입니다.
 - **자료 API 재확인(`api/notes.js`):** 서버가 검증한 사용자와 저장된 `owner_id`를 다시 대조합니다. 남의 메모는 `404 NOT_FOUND`, `id` 밖의 쿼리는 `400 QUERY_NOT_ALLOWED`, 본문의 `role`·`zone`·강사 표시는 `403 ROLE_NOT_TRUSTED`, 본문의 다른 소유자는 `403 OWNER_MISMATCH`입니다. 로그에는 짧은 사유만 남깁니다.
 - **남은 점:** 판정기에는 메모 주인 칸이 없어 "B가 A 메모"는 API가 막습니다. 저장된 강사 권한과 공지 API는 아직 없습니다. 새 이유 코드 `route_not_allowed`·`zone_not_allowed`의 운영 등록 여부는 확인하지 못했습니다.
