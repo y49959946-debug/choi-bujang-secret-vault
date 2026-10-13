@@ -14,7 +14,7 @@
 // 소유자 검사: 모든 한 건 요청은 DB 조건에 owner_id = 서버가 확인한 사용자 ID를 함께 겁니다.
 // 남의 메모는 존재 여부도 드러내지 않도록 없는 메모와 똑같이 404로 거부합니다(기본 거부).
 // 본문에 다른 사람의 owner_id(또는 userId)를 넣어 소유자를 바꾸려 하면 403으로 거부합니다.
-// URL의 쿼리 값(owner_id 등)은 읽지 않습니다. DB 권한(GRANT·RLS) 강화는 다음 제작에서 합니다.
+// URL 쿼리는 자료 ID(id)만 받고, 그 밖의 쿼리(owner_id·role·zone 등)가 붙으면 400으로 거부합니다(8단계).
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
@@ -82,6 +82,32 @@ function fail(response, status, error) {
   return response.status(status).json({ error });
 }
 
+// 8단계 API 재확인: 판정기를 거치지 않은 직접 요청(메뉴 우회)도 여기서 다시 막습니다.
+// - 신원은 서버가 검증한 userId 하나뿐입니다. 화면 메뉴·요청 본문·쿼리의 role, zone, owner 값은 믿지 않습니다.
+// - 강사 권한은 서버에 저장된 곳에서만 읽어야 합니다. 지금은 저장된 강사 권한이 없으므로 모두 학생으로 보고,
+//   강사·심판 토큰이라도 이 API에서 남의 메모를 읽거나 고치는 예외는 없습니다.
+// - 이 API는 '내 메모' 구역만 다룹니다. 강사 공지 구역 자료는 여기서 나오지 않습니다.
+// - 거부하면 짧은 사유 코드만 응답·로그에 남깁니다(토큰·사용자 ID·메모 내용은 남기지 않습니다).
+const ROLE_FIELDS = ['role', 'roles', 'zone', 'isInstructor', 'is_instructor', 'instructor', 'isAdmin', 'is_admin', 'admin'];
+const ALLOWED_QUERY_KEYS = new Set(['id']); // vercel.json이 /api/notes/:id를 ?id=로 넘깁니다. 그 밖의 쿼리는 받지 않습니다.
+
+function deny(response, status, error, reason) {
+  console.warn(`notes: 거부 ${reason}`);
+  return fail(response, status, error);
+}
+
+const hasRoleField = (input) => Boolean(input) && ROLE_FIELDS.some((key) => Object.hasOwn(input, key));
+
+function queryProblem(request) {
+  const query = request.query;
+  if (!query || typeof query !== 'object') return null;
+  for (const key of Object.keys(query)) {
+    if (!ALLOWED_QUERY_KEYS.has(key)) return 'query_not_allowed';
+  }
+  if (Object.hasOwn(query, 'id') && typeof query.id !== 'string') return 'query_not_allowed';
+  return null;
+}
+
 function dbError(response, error, action) {
   console.error(`notes: ${action} 실패`, error?.code ?? 'unknown');
   return fail(response, 502, 'NOTES_DB_FAILED');
@@ -120,13 +146,24 @@ export default async function handler(request, response) {
   const userId = String(identity.userId).toLowerCase();
 
   const method = request.method ?? 'GET';
+
+  // 8단계: 쿼리로 기능·구역·주인을 고르지 못하게 합니다. 자료 ID(id) 하나만 받습니다.
+  const badQuery = queryProblem(request);
+  if (badQuery) return deny(response, 400, 'QUERY_NOT_ALLOWED', badQuery);
+
   const noteId = noteIdFrom(request);
 
   // 8단계: 요청 경로에서 자원 ID를 정합니다(src/resources.mjs). 이 함수는 '내 메모' 구역만 다룹니다.
   // 메모 목록은 notes, 메모 한 건은 note:<id>이며, 강사 공지(notice:<id>)와 구별됩니다.
   const resource = resourceFromPath(noteId === null ? '/api/notes' : `/api/notes/${noteId}`);
-  if (!resource || resource.zone !== ZONES.OWNER_NOTES) return fail(response, 404, 'NOT_FOUND');
+  if (!resource) return deny(response, 404, 'NOT_FOUND', 'unknown_resource');
+  if (resource.zone !== ZONES.OWNER_NOTES) return deny(response, 403, 'ZONE_NOT_ALLOWED', 'zone_mismatch');
   response.setHeader('X-Resource-Id', resource.resourceId);
+
+  // 8단계: 본문의 role·zone·강사 표시는 믿지 않고 거부합니다(권한은 서버가 검증한 신원으로만 정합니다).
+  if ((method === 'POST' || method === 'PUT') && hasRoleField(readBody(request))) {
+    return deny(response, 403, 'ROLE_NOT_TRUSTED', 'role_in_body');
+  }
 
   const supabase = database(url, secretKey);
 
@@ -138,11 +175,15 @@ export default async function handler(request, response) {
           .eq('owner_id', userId)
           .order('created_at', { ascending: true }).order('id', { ascending: true });
         if (error) return dbError(response, error, '목록 조회');
-        return response.status(200).json((data ?? []).map(toNote));
+        // 저장된 owner_id를 한 번 더 대조합니다. 본인 것이 아닌 행은 응답에 넣지 않습니다.
+        const rows = data ?? [];
+        const own = rows.filter((row) => row.owner_id === userId);
+        if (own.length !== rows.length) console.warn('notes: 거부 owner_mismatch');
+        return response.status(200).json(own.map(toNote));
       }
       if (method === 'POST') {
         const input = readBody(request);
-        if (ownerChangeAttempt(input, userId)) return fail(response, 403, 'OWNER_MISMATCH');
+        if (ownerChangeAttempt(input, userId)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
         const fields = validFields(input);
         if (!fields) return fail(response, 400, 'INVALID_NOTE');
         let id = input.id;
@@ -164,21 +205,22 @@ export default async function handler(request, response) {
       response.setHeader('Allow', 'GET, PUT, DELETE');
       return fail(response, 405, 'METHOD_NOT_ALLOWED');
     }
-    if (!UUID.test(noteId)) return fail(response, 404, 'NOT_FOUND');
+    if (!UUID.test(noteId)) return deny(response, 404, 'NOT_FOUND', 'unknown_resource');
     const id = noteId.toLowerCase();
 
     if (method === 'GET') {
       const { data, error } = await supabase.from('notes').select(COLUMNS)
         .eq('public_id', id).eq('owner_id', userId).maybeSingle();
       if (error) return dbError(response, error, '한 건 조회');
-      if (!data || data.owner_id !== userId) return fail(response, 404, 'NOT_FOUND');
+      // 남의 메모는 없는 메모와 똑같이 404로 거부합니다(존재 여부를 드러내지 않음).
+      if (!data || data.owner_id !== userId) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
       return response.status(200).json(toNote(data));
     }
 
     if (method === 'PUT') {
       const input = readBody(request);
       // 새 행의 소유자: 본문이 다른 사람을 소유자로 지정하면 거부합니다.
-      if (ownerChangeAttempt(input, userId)) return fail(response, 403, 'OWNER_MISMATCH');
+      if (ownerChangeAttempt(input, userId)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
       const fields = validFields(input);
       if (!fields) return fail(response, 400, 'INVALID_NOTE');
       // 기존 행의 소유자: owner_id = 본인 조건이 맞는 행만 고칩니다. 새 행의 owner_id도 본인으로 고정합니다.
@@ -186,7 +228,7 @@ export default async function handler(request, response) {
         .update({ ...fields, owner_id: userId, updated_at: new Date().toISOString() })
         .eq('public_id', id).eq('owner_id', userId).select(COLUMNS).maybeSingle();
       if (error) return dbError(response, error, '수정');
-      if (!data) return fail(response, 404, 'NOT_FOUND');
+      if (!data) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
       if (data.owner_id !== userId) {
         console.error('notes: 수정 후 소유자 불일치');
         return fail(response, 500, 'NOTES_SERVER_ERROR');
@@ -198,7 +240,7 @@ export default async function handler(request, response) {
     const { data, error } = await supabase.from('notes')
       .delete().eq('public_id', id).eq('owner_id', userId).select('public_id');
     if (error) return dbError(response, error, '삭제');
-    if (!data?.length) return fail(response, 404, 'NOT_FOUND');
+    if (!data?.length) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
     return response.status(204).end();
   } catch {
     console.error('notes: 서버 오류');
