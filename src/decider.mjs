@@ -100,18 +100,15 @@ function freshlyVerified(request) {
 // - 허용하는 경로는 아래 표뿐이며, path와 route가 서로 맞아야 합니다. 표에 없거나 어긋나면 거부합니다.
 // - 기능은 쿼리로 고르지 않습니다. 쿼리가 붙은 요청(queryLength > 0)은 거부합니다.
 // - 경로의 마지막 칸은 자료 ID뿐입니다. :id와 같은 깊이에 export 같은 기능 경로를 두지 않습니다.
-//   export·all·search처럼 기능 이름으로 쓰이는 값은 자료 ID로 받지 않고 알 수 없는 경로로 거부합니다.
-//   (여러 사람의 자료를 한꺼번에 여는 기능 경로가 메모 한 건처럼 통과하지 못하게 합니다.)
+//   메모 ID는 '아는 모양'만 엽니다(허용 목록): 메모 API가 실제로 쓰는 UUID와, 공식 연습 요청의 'demo'뿐입니다.
+//   export·all 같은 기능 이름이나 그 밖의 모르는 ID는 알 수 없는 경로로 거부합니다.
 // - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
 //   강사 공지 구역은 읽기·수정 모두 거부합니다(저장된 강사 권한과 공지 API가 아직 없습니다).
 // - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
 //   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/u;
-const FUNCTION_WORDS = new Set([
-  'export', 'exports', 'all', 'search', 'list', 'admin', 'dump', 'download', 'downloads',
-  'backup', 'bulk', 'batch', 'import', 'sync', 'share', 'shared', 'public', 'everyone',
-  'zip', 'csv', 'json', 'archive', 'report', 'reports', 'feed', 'query', 'filter', 'raw',
-]);
+const NOTE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu; // 메모 API가 받는 메모 ID
+const PRACTICE_NOTE_IDS = new Set(['demo']); // 공식 연습 요청(scripts/fixture-7.mjs)의 메모 ID
 // 엔진이 확인한 주체·기기: subjectId는 공백 없는 가명 ID, deviceId는 16자리 소문자 16진수입니다.
 // 둘 중 하나라도 없거나 모양이 틀리면, 누구의 어느 기기인지 모르는 요청이므로 구역에 들이지 않습니다.
 const SUBJECT_ID = /^[\x21-\x7e]{1,256}$/u;
@@ -133,7 +130,9 @@ function routeShape(method, path) {
   if (typeof method !== 'string' || typeof path !== 'string' || path.length > 256) return null;
   const match = /^\/(notes|notices)(?:\/([^/?#]+))?$/u.exec(path);
   if (!match) return null;
-  if (match[2] !== undefined && (!ITEM_ID.test(match[2]) || FUNCTION_WORDS.has(match[2].toLowerCase()))) return null;
+  if (match[2] !== undefined && !ITEM_ID.test(match[2])) return null;
+  if (match[1] === 'notes' && match[2] !== undefined
+      && !NOTE_ID.test(match[2]) && !PRACTICE_NOTE_IDS.has(match[2])) return null;
   return `${method} /${match[1]}${match[2] === undefined ? '' : '/:id'}`;
 }
 
