@@ -94,6 +94,29 @@
 
 `npm run decider:test`는 가상 요청으로 하는 로컬 연습이며 심판 판정이 아닙니다. 미등록 기기에서 들어오는 실제 공격은 심판이 따로 시험합니다.
 
+### 7단계 · 평소와 다른 접속은 다시 확인합니다
+
+- `src/decider.mjs`에 입력 검사 `readAccessContext`와 규칙 `step_up_required`를 더했습니다. `RULE_IDS`는 `['starter.deny', 'device_registered', 'step_up_required']`이며 기기 규칙이 여전히 가장 먼저입니다.
+- 접속 정보는 `signals.source`가 `judge_fixture`(엔진이 검증해 넘긴 심판 가상 사건)일 때만 씁니다. `none`이나 그 밖의 출처, 값이 없는 칸은 `null`로 두고 정상값으로 채우지 않습니다.
+- 새벽(0~5시) + 처음 보는 네트워크(`unusual`·`new`·`first_seen`) + 최근 10분 사건 10건 이상이 모두 겹칠 때만 `step_up`(이유 코드 `step_up_required`)입니다. 지역은 근거로 쓰지 않으며 지역 하나로 거부·영구 차단하지 않습니다.
+- 다시 확인은 계약의 `stepUp`만 봅니다. `verified`가 `true`이고 `authAgeSeconds`가 0~300초일 때만 같은 사건을 허용합니다. 토큰 원문은 판정기·로그·README에 남기지 않습니다.
+
+#### 재로그인 확인 계약 점검 (2026-10-13)
+
+- 요청 계약(`docs/DECIDER_REQUEST.md`)에는 `stepUp: {verified, authAgeSeconds}` 칸이 있습니다. 그러나 이 값을 실제로 채우고 새 로그인 시각을 검증하는 제공 엔진(`student-kit/sdp-core`)은 이 저장소와 작업 환경에 없습니다.
+- 그래서 가상 사건 규칙만 시험했습니다. **실제 자료 차단(다시 로그인 전 차단)과 새 로그인 뒤 허용의 실측은 미실행**입니다. 엔진이 준비된 환경에서만 실측합니다.
+
+#### 가상 시험 결과 (커밋 `b17cdd2`)
+
+| 시험 | 결과 |
+|---|---|
+| `npm run decider:test` | 4항목 통과 (등록 기기 allow, 미등록 deny, 복합 이상 step_up, 다시 확인한 복합 이상 allow) |
+| `npm run fixture:7` | 정상 사건 allow, 복합 이상 사건 step_up |
+| 복합 이상 + 아직 다시 로그인 안 함 | step_up · step_up_required |
+| 복합 이상 + 엔진 확인 60초 전 새 로그인 | allow · approved |
+| 복합 이상 + 800초 전 로그인 / 시각 없음 | step_up · step_up_required |
+| 실제 재로그인 전 차단·새 요청 허용 | **미실행** (제공 엔진 없음) |
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.
