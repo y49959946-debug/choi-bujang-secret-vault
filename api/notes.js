@@ -15,7 +15,7 @@
 // 남의 메모는 존재 여부도 드러내지 않도록 없는 메모와 똑같이 404로 거부합니다(기본 거부).
 // 본문에 다른 사람의 owner_id(또는 userId)를 넣어 소유자를 바꾸려 하면 403으로 거부합니다.
 // URL 쿼리는 자료 ID(id)만 받고, 그 밖의 쿼리(owner_id·role·zone 등)가 붙으면 400으로 거부합니다(8단계).
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from '../src/verify-login.mjs';
@@ -72,10 +72,21 @@ function validFields(input) {
 
 // 본문이 다른 사람을 소유자로 지정하면 true. 본인 ID와 같거나 없으면 false.
 const OWNER_FIELDS = ['owner_id', 'ownerId', 'userId', 'user_id'];
-function ownerChangeAttempt(input, userId) {
+function ownerChangeAttempt(input, ownIds) {
   if (!input) return false;
   return OWNER_FIELDS.some((key) => Object.hasOwn(input, key)
-    && String(input[key]).toLowerCase() !== userId);
+    && !ownIds.includes(String(input[key]).toLowerCase()));
+}
+
+// 8단계 소유자 키: 학생 토큰은 검증된 sub 그대로 씁니다.
+// 심판 토큰은 시험 계정 A·B가 같은 sub를 함께 쓸 수 있으므로, 로그인 검사기가 검증한 runId·identity(a/b)까지 묶어
+// owner_id(uuid 칸)에 넣을 고정 UUID를 만듭니다. 그래서 같은 sub라도 A와 B의 메모는 서로 다른 주인입니다.
+function ownerKeyOf(identity) {
+  const sub = String(identity.userId).toLowerCase();
+  if (identity.kind !== 'judge') return sub;
+  const h = createHash('sha256').update(`judge|${sub}|${identity.runId}|${identity.identity}`).digest('hex');
+  const variant = ((parseInt(h[16], 16) & 3) | 8).toString(16);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
 function fail(response, status, error) {
@@ -142,8 +153,10 @@ export default async function handler(request, response) {
     response.setHeader('WWW-Authenticate', 'Bearer');
     return fail(response, 401, 'LOGIN_REQUIRED');
   }
-  // 서버가 확인한 사용자 ID. DB(uuid)는 소문자로 돌려주므로 비교를 위해 소문자로 맞춥니다.
-  const userId = String(identity.userId).toLowerCase();
+  // 서버가 확인한 소유자 키. DB(uuid)는 소문자로 돌려주므로 비교를 위해 소문자로 맞춥니다.
+  const userId = ownerKeyOf(identity);
+  // 본문에 적힌 소유자가 본인의 검증된 sub이거나 소유자 키이면 '본인'으로 봅니다(저장은 언제나 소유자 키).
+  const ownIds = [userId, String(identity.userId).toLowerCase()];
 
   const method = request.method ?? 'GET';
 
@@ -185,7 +198,7 @@ export default async function handler(request, response) {
       }
       if (method === 'POST') {
         const input = readBody(request);
-        if (ownerChangeAttempt(input, userId)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
+        if (ownerChangeAttempt(input, ownIds)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
         const fields = validFields(input);
         if (!fields) return fail(response, 400, 'INVALID_NOTE');
         let id = input.id;
@@ -224,7 +237,7 @@ export default async function handler(request, response) {
     if (method === 'PUT') {
       const input = readBody(request);
       // 새 행의 소유자: 본문이 다른 사람을 소유자로 지정하면 거부합니다.
-      if (ownerChangeAttempt(input, userId)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
+      if (ownerChangeAttempt(input, ownIds)) return deny(response, 403, 'OWNER_MISMATCH', 'owner_in_body');
       const fields = validFields(input);
       if (!fields) return fail(response, 400, 'INVALID_NOTE');
       // 기존 행의 소유자: owner_id = 본인 조건이 맞는 행만 고칩니다. 새 행의 owner_id도 본인으로 고정합니다.
