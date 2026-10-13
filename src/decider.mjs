@@ -20,7 +20,10 @@ const respond = (request, decision, reasonCode, ruleIds) => ({
 
 export async function decide(request) {
   // 6단계: 등록된 기기가 아니면 다른 판단보다 먼저 거부합니다.
-  if (request?.deviceRegistered !== true) {
+  // 요청 객체 자신이 가진 deviceRegistered만 믿습니다(상속·프로토타입으로 끼워 넣은 값은 무시).
+  const registered = request !== null && typeof request === 'object'
+    && Object.hasOwn(request, 'deviceRegistered') && request.deviceRegistered === true;
+  if (!registered) {
     return respond(request, 'deny', 'device_not_registered', ['device_registered']);
   }
 

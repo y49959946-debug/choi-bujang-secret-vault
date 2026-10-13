@@ -67,6 +67,33 @@
 
 **결론:** 현재 배포 파일과 GitHub 최신 파일에서는 메모 문장이 사라졌습니다. 그러나 옛 공개 커밋 `06123c5`와 옛 배포가 남아 있으므로 과거 노출은 해소되지 않았습니다. 또 `/api/notes`가 로그인 없이 열려 있어 현재도 누구나 가상 메모를 읽을 수 있습니다.
 
+### 6단계 · 등록한 기기만 자료실에 들어옵니다
+
+- `src/decider.mjs`에 규칙 `device_registered`를 더했습니다. `RULE_IDS`는 `['starter.deny', 'device_registered']`입니다.
+- 판정 요청(`docs/DECIDER_REQUEST.md`)의 `deviceRegistered`가 `true`일 때만 자료실 읽기(GET)를 `allow`(이유 코드 `approved`)로 허용합니다. `false`이거나 값이 없으면 `deny`(이유 코드 `device_not_registered`)입니다. 읽기가 아닌 요청은 시작 틀의 `starter.deny`대로 거부합니다.
+- 계약에 있는 `deviceRegistered`·`method`만 읽습니다. `request.device`처럼 계약에 없는 값, 브라우저가 보낸 사용자 번호·역할은 쓰지 않습니다.
+- 이번 단계에는 따로 설치할 접속 프로그램이 없습니다. 인증서·CA·서명 키·기기 개인키를 만들거나 Git에 넣지 않았습니다. 배포된 화면과 `/api/*`는 바꾸지 않았습니다.
+
+#### 확인 순서
+
+1. 저장소 루트에서 `npm run decider:test`를 실행합니다.
+2. 출력에 다음 두 줄이 모두 보이는지 확인합니다.
+   ```
+   통과 · 등록 기기의 정상 요청
+   통과 · 미등록 기기의 가상 요청
+   ```
+   `등록 기기의 정상 요청`은 `allow`일 때, `미등록 기기의 가상 요청`은 `deny`이면서 이유 코드가 `device_not_registered`일 때만 `통과`로 나옵니다. `확인 필요`가 하나라도 나오면 `src/decider.mjs`를 다시 봅니다.
+3. 시크릿 창에서 배포 주소에 A로 로그인해 기존 메모 화면이 그대로 열리는지 봅니다.
+
+#### 시험 결과 기록 (2026-10-13, 커밋 `30312e8`)
+
+| 시험 요청 | 판정 | 이유 코드 | 규칙 |
+|---|---|---|---|
+| 등록 기기의 정상 요청 (`GET /notes/:id`, `deviceRegistered: true`) | allow | approved | device_registered |
+| 미등록 기기의 가상 요청 (`deviceRegistered: false`) | deny | device_not_registered | device_registered |
+
+`npm run decider:test`는 가상 요청으로 하는 로컬 연습이며 심판 판정이 아닙니다. 미등록 기기에서 들어오는 실제 공격은 심판이 따로 시험합니다.
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.
