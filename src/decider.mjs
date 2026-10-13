@@ -2,10 +2,12 @@
 // 6단계부터 규칙을 하나씩 추가합니다. 이 기본 응답은 모든 요청을 거부합니다.
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
 //
-// 6단계 device_registered: 엔진이 확인한 request.deviceRegistered가 true일 때만 자료실 읽기(GET)를 허용합니다.
-// 미등록(false)이거나 값이 없으면 device_not_registered로 거부합니다.
-// 계약(docs/DECIDER_REQUEST.md)에 있는 deviceRegistered·method만 읽고, request.device 같은 없는 값은 쓰지 않습니다.
-// 읽기가 아닌 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
+// 규칙 순서 (계약 docs/DECIDER_REQUEST.md에 있는 값만 읽습니다. request.device·role 같은 없는 값은 쓰지 않습니다.)
+// 6단계 device_registered: request.deviceRegistered가 true가 아니면 가장 먼저 device_not_registered로 거부합니다.
+// 8단계 resource_zones: 엔진이 확인한 deviceId·subjectId·method·path·route가 맞는 구역 경로만 들입니다.
+//   owner_notes_zone(내 메모 다섯 경로)과 class_notices_zone(공지 읽기)만 허용하고, 공지 수정·알 수 없는 경로는 거부합니다.
+// 7단계 step_up_required: 허용될 요청이라도 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
+// 그 밖의 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
 export const RULE_IDS = Object.freeze([
   'starter.deny', 'device_registered', 'step_up_required',
   'resource_zones', 'owner_notes_zone', 'class_notices_zone',
