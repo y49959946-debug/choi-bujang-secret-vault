@@ -89,6 +89,29 @@ function ownerKeyOf(identity) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+// 8단계 진단: 로그인 실패(401)의 모양만 기록합니다. 토큰 원문·서명·사용자 ID는 남기지 않습니다.
+// 서명을 검증하지 않고 발급자·대상·만료만 분류하므로, 이 결과로 신원을 정하지 않습니다(신원은 위 검증기만 정함).
+function loginFailureShape(authorization) {
+  if (typeof authorization !== 'string' || !authorization) return 'header=none';
+  const match = /^Bearer ([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/u.exec(authorization);
+  if (!match) return `header=${authorization.startsWith('Bearer ') ? 'bearer_malformed' : 'other_scheme'}`;
+  let claims;
+  try { claims = JSON.parse(Buffer.from(match[2], 'base64url').toString('utf8')); } catch { return 'header=bearer token=undecodable'; }
+  const judgeIssuer = String(config.judgeIssuer);
+  const issuer = claims?.iss === judgeIssuer ? 'judge' : claims?.iss === config.identityProvider?.issuer ? 'student' : 'other';
+  let expectedAud = 'unknown';
+  try { expectedAud = issuer === 'judge' ? new URL(config.publicAppUrl).hostname : String(config.identityProvider?.audience); } catch { /* 진단용 */ }
+  const auds = Array.isArray(claims?.aud) ? claims.aud : [claims?.aud];
+  const audShape = auds.includes(expectedAud) ? 'ok'
+    : auds.some((value) => typeof value === 'string' && value.endsWith('.vercel.app')) ? 'other_vercel_host' : 'mismatch';
+  const now = Math.floor(Date.now() / 1000);
+  const exp = !Number.isSafeInteger(claims?.exp) ? 'missing' : claims.exp <= now ? 'expired' : 'ok';
+  const extra = issuer === 'judge'
+    ? ` role=${claims?.aleph_role === 'judge' ? 'ok' : 'bad'} identity=${['a', 'b'].includes(claims?.aleph_identity) ? claims.aleph_identity : 'bad'} age=${Number.isSafeInteger(claims?.iat) ? now - claims.iat : 'missing'}s`
+    : '';
+  return `header=bearer iss=${issuer} aud=${audShape} exp=${exp}${extra}`;
+}
+
 function fail(response, status, error) {
   return response.status(status).json({ error });
 }
@@ -150,6 +173,7 @@ export default async function handler(request, response) {
     identity = null;
   }
   if (!identity?.userId) {
+    console.warn(`notes: 거부 login_required ${loginFailureShape(request.headers?.authorization)}`);
     response.setHeader('WWW-Authenticate', 'Bearer');
     return fail(response, 401, 'LOGIN_REQUIRED');
   }
