@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from '../src/verify-login.mjs';
+import { resourceFromPath, ZONES } from '../src/resources.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const TITLE_MAX = 120;
@@ -120,6 +121,13 @@ export default async function handler(request, response) {
 
   const method = request.method ?? 'GET';
   const noteId = noteIdFrom(request);
+
+  // 8단계: 요청 경로에서 자원 ID를 정합니다(src/resources.mjs). 이 함수는 '내 메모' 구역만 다룹니다.
+  // 메모 목록은 notes, 메모 한 건은 note:<id>이며, 강사 공지(notice:<id>)와 구별됩니다.
+  const resource = resourceFromPath(noteId === null ? '/api/notes' : `/api/notes/${noteId}`);
+  if (!resource || resource.zone !== ZONES.OWNER_NOTES) return fail(response, 404, 'NOT_FOUND');
+  response.setHeader('X-Resource-Id', resource.resourceId);
+
   const supabase = database(url, secretKey);
 
   try {
