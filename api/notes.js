@@ -248,11 +248,20 @@ export default async function handler(request, response) {
     if (!UUID.test(noteId)) return deny(response, 404, 'NOT_FOUND', 'unknown_resource');
     const id = noteId.toLowerCase();
 
+    // 8단계: 저장된 소유자를 먼저 읽어 검증된 사용자와 명시적으로 대조합니다.
+    // 메모가 없으면 404, 있는데 주인이 다르면 403과 짧은 거부 사유를 남깁니다(내용은 돌려주지 않음).
+    // 아래 실제 조회·수정·삭제도 owner_id 조건을 그대로 걸어 한 번 더 막습니다.
+    const stored = await supabase.from('notes').select('owner_id').eq('public_id', id).maybeSingle();
+    if (stored.error) return dbError(response, stored.error, '소유자 확인');
+    if (!stored.data) return deny(response, 404, 'NOT_FOUND', 'missing');
+    if (String(stored.data.owner_id).toLowerCase() !== userId) {
+      return deny(response, 403, 'OWNER_MISMATCH', 'owner_mismatch');
+    }
+
     if (method === 'GET') {
       const { data, error } = await supabase.from('notes').select(COLUMNS)
         .eq('public_id', id).eq('owner_id', userId).maybeSingle();
       if (error) return dbError(response, error, '한 건 조회');
-      // 남의 메모는 없는 메모와 똑같이 404로 거부합니다(존재 여부를 드러내지 않음).
       if (!data || data.owner_id !== userId) return deny(response, 404, 'NOT_FOUND', 'not_owner_or_missing');
       allow();
       return response.status(200).json(toNote(data));
