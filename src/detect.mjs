@@ -14,8 +14,15 @@
 //   - 사용자의 사건에 검증된 네트워크 정보가 있으면 평소와 다른 네트워크(unusual·new·first_seen)의 GET만 셉니다.
 //     평소 네트워크에서의 조회는 아무리 많아도 의심으로 표시하지 않습니다.
 //   - 네트워크 정보가 전혀 없는 사건(공식 연습 형식, docs/DETECT_EVENTS.md)은 그 계약대로 다량 조회만으로 판단합니다.
-//   - 의심이면 { action: 'propose_revocation', reasonCode: 'burst_read', subject }, 아니면 { action: 'observe' }입니다.
-//     정상 사건과 정상 기기는 그대로 둡니다. 이 결과는 제안일 뿐이며 실제 회수는 엔진이 집행합니다.
+//   - 의심이면 { action: 'propose_revocation', reasonCode: 'burst_read', subject, deviceId }, 아니면 { action: 'observe' }입니다.
+//
+// 9단계 제작 3 · 회수 제안: 판정기의 허용·거부 응답과는 별도인 탐지 결과입니다.
+//   - 대상은 엔진이 확인한 가상 기기 한 개입니다. 다량 조회가 일어난 그 10분 구간에서 센 조회를 가장 많이 보낸 기기를
+//     deviceId로 지목합니다(같으면 가장 최근에 보낸 기기). 같은 사용자의 다른 정상 기기는 대상에 넣지 않습니다.
+//   - 사유는 reasonCode('burst_read')로 남깁니다.
+//   - 기기 칸이 없는 공식 연습 사건(docs/DETECT_EVENTS.md)에서는 확인된 기기가 없으므로 계약 모양 그대로
+//     { action, reasonCode, subject }만 돌려줍니다.
+//   - 이 파일은 회수 API를 부르거나 기기 권한을 바꾸지 않습니다. 실제 회수와 걸린 시간은 엔진·심판이 확인합니다.
 
 const SUBJECT = /^[\x21-\x7e]{1,256}$/u;      // 공백 없는 가명 ID
 const DEVICE = /^[0-9a-f]{16}$/u;              // 엔진이 확인한 16자리 소문자 16진수 기기 ID
@@ -65,13 +72,32 @@ export function readDetectionEvents(events) {
   return Object.freeze(events.map(readDetectionEvent).filter(Boolean).sort((a, b) => a.atMs - b.atMs));
 }
 
-// 시각 배열(정렬됨)에서 어느 10분 구간이든 BURST_LIMIT을 넘는지
-function hasBurst(times) {
-  for (let start = 0, end = 0; end < times.length; end += 1) {
-    while (times[end] - times[start] >= BURST_WINDOW_MS) start += 1;
-    if (end - start + 1 > BURST_LIMIT) return true;
+// 사건 배열(시각 순)에서 어느 10분 구간이든 BURST_LIMIT을 처음 넘는 구간의 사건들, 없으면 null
+function firstBurst(list) {
+  for (let start = 0, end = 0; end < list.length; end += 1) {
+    while (list[end].atMs - list[start].atMs >= BURST_WINDOW_MS) start += 1;
+    if (end - start + 1 > BURST_LIMIT) return list.slice(start, end + 1);
   }
-  return false;
+  return null;
+}
+
+// 다량 조회 구간에서 조회를 가장 많이 보낸 확인된 기기 하나(같으면 가장 최근 기기), 없으면 null
+function targetDevice(windowEvents) {
+  const counts = new Map();
+  for (const event of windowEvents) {
+    if (event.device === null) continue;
+    const entry = counts.get(event.device) ?? { count: 0, lastMs: 0 };
+    entry.count += 1;
+    entry.lastMs = Math.max(entry.lastMs, event.atMs);
+    counts.set(event.device, entry);
+  }
+  let best = null;
+  for (const [device, entry] of counts) {
+    if (!best || entry.count > best.count || (entry.count === best.count && entry.lastMs > best.lastMs)) {
+      best = { device, ...entry };
+    }
+  }
+  return best ? best.device : null;
 }
 
 export function detect(events) {
@@ -85,8 +111,12 @@ export function detect(events) {
     const knowsNetwork = list.some((event) => event.network !== null);
     const counted = list.filter((event) => event.method === 'GET'
       && (!knowsNetwork || UNUSUAL_NETWORKS.has(event.network)));
-    if (hasBurst(counted.map((event) => event.atMs))) {
-      return { action: 'propose_revocation', reasonCode: 'burst_read', subject };
+    const burst = firstBurst(counted);
+    if (burst) {
+      const deviceId = targetDevice(burst);
+      return deviceId === null
+        ? { action: 'propose_revocation', reasonCode: 'burst_read', subject }
+        : { action: 'propose_revocation', reasonCode: 'burst_read', subject, deviceId };
     }
   }
   return { action: 'observe' };
