@@ -32,8 +32,18 @@ if (args.includes('--apply')) {
   else {
     const out = ['BYTE BACK · 안전 정책 되돌리기 (미리보기 — 아무것도 바꾸지 않음)', ''];
     out.push('[복원할 버전]', `  ${plan.baselineId} (${plan.baselineCommit})`);
-    out.push(`  상태: ${plan.status}${plan.provenance ? ` · 사본 검증 ${plan.provenance === 'git_commit_verified' ? '지문 + 기준 커밋 대조' : '지문만'}` : ''}`);
+    out.push(`  상태: ${plan.status}`);
     if (plan.reason) out.push(`  이유: ${plan.reason}`);
+    if (plan.verification) {
+      const label = { git_commit_verified: '통과 — 기준 커밋의 실제 내용과도 같음', pinned_digest_shallow: '기준 커밋 대조 불가(얕은 복제) — 고정 지문으로만 확인',
+        pinned_digest_only: '기준 커밋 대조 불가(Git 기록 없음) — 고정 지문으로만 확인' }[plan.verification.provenance];
+      out.push('', '[사본 다시 읽기·검증 — 실행 전에 매번 다시 함]');
+      out.push(`  manifest 고정 지문: 일치 (${plan.verification.manifestSha256.slice(0, 16)}…)`);
+      for (const f of plan.verification.files) out.push(`  사본 파일 지문 일치: ${f.path} (${f.sha256.slice(0, 12)}…)`);
+      out.push(`  설정 칸 사본 지문: 일치 (${plan.verification.configFieldsSha256.slice(0, 12)}…)`);
+      out.push(`  기준 커밋 대조: ${label}`);
+      out.push('  검증에 하나라도 실패하면 바뀔 항목을 만들지 않고 멈춥니다. 실행(--apply) 때도 사본을 다시 읽어 같은 검증을 합니다.');
+    }
     if (plan.targets) {
       out.push('', '[바뀔 항목]');
       if (!plan.targets.files.length && !plan.targets.configFields.length) out.push('  없음 — 시험 정책이 이미 사본과 같습니다');
@@ -50,6 +60,7 @@ if (args.includes('--apply')) {
         out.push(`  설정 칸 되돌림: aleph.config.json · ${c.field}${c.added ? ` (지울 것 [${c.added.join(', ')}] 되살릴 것 [${c.removed.join(', ')}])` : ''}`);
       }
       out.push('', '[보존 — 바꾸지 않음]');
+      if (plan.preserved.restoreRoute) out.push(`  복구 경로: ${plan.preserved.restoreRoute} (10단계에서 등록, restoreRoute·allowedRoutes에서 지우지 않음)`);
       for (const c of plan.preserved.compareOnly) out.push(`  ${c.field}: 운영 측 값이라 보존${c.differsFromBaseline ? ' (사본과 다름 — 운영 측에 확인하세요)' : ''}`);
       out.push(`  설정의 다른 칸: ${plan.preserved.otherConfigFields.filter((k) => k !== 'judgeIssuer').join(', ')}`);
       out.push(`  다른 서비스 규칙: ${plan.preserved.paths.join(', ')}`);

@@ -4,9 +4,12 @@ import { test } from 'node:test';
 import { cpSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { diffPolicy, verifyBaseline, POLICY_FILES, TRUSTED_BASELINE } from '../src/policy-diff.mjs';
 
 const repo = resolve(import.meta.dirname, '..');
+// 얕은 복제(--depth 1)로 받은 저장소에는 기준 커밋이 없어, 고정 지문으로만 검증합니다.
+const shallow = (() => { try { return execFileSync('git', ['-C', repo, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === 'true'; } catch { return false; } })();
 
 // 저장소의 정책 파일·설정·사본만 복사한 가상 작업 폴더(Git 기록 없음)
 function workspace() {
@@ -34,7 +37,7 @@ function snapshot(dir) {
 test('실제 저장소: 사본이 기준 커밋과 대조되고, 9단계 이후 정책 차이는 10단계 복구 경로 등록뿐이다', () => {
   const report = diffPolicy(repo);
   assert.equal(report.baseline.verified, true);
-  assert.equal(report.baseline.provenance, 'git_commit_verified');
+  assert.equal(report.baseline.provenance, shallow ? 'pinned_digest_shallow' : 'git_commit_verified');
   assert.equal(report.writeCount, 0);
   // 정책 파일 6개는 9단계 그대로이고, 설정은 제작 3에서 넣은 복구 경로만 다릅니다.
   assert.deepEqual(report.changes.filter((c) => c.kind === 'file'), []);

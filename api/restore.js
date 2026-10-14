@@ -7,6 +7,8 @@
 //   - 신원은 로그인 검증(src/verify-login.mjs) 결과로만 정합니다. 본문의 owner_id·role 등은 받지 않고 거부합니다.
 //   - 복원 전 대조: 사본이 요청자 소유인지(ID·소유자), 사본의 제목·내용 해시가 맞는지(사본 무결성),
 //     지금 행이 있으면 그 주인도 요청자인지. 하나라도 어긋나면 아무것도 쓰지 않습니다.
+//   - 쓰기 직전 재검증: 사본을 한 번 더 읽어 처음 검증한 사본(해시·저장 시각)과 같은지 봅니다. 다르거나 없으면 409로 멈춥니다.
+//   - 응답에 사본 버전(backupVersion: 저장 시각·해시)과 바뀐 칸 이름(changes)을 넣습니다. 본문은 넣지 않습니다.
 //   - 복원: 삭제됐으면 그 한 건을 다시 넣고, 변조됐으면 ID·주인 조건을 함께 걸어 그 한 건만 고칩니다.
 //     다른 메모는 건드리지 않습니다.
 //   - 복원 후 대조: 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인하고, 결과만(해시) 응답합니다.
@@ -107,14 +109,28 @@ export default async function handler(request, response) {
       return fail(response, 409, 'OWNER_CONFLICT');
     }
     const before = current ? { state: 'modified', content_sha256: sha256(current.content) } : { state: 'deleted', content_sha256: null };
+    // 실행 전에 보여 줄 버전과 바뀔 항목(본문 없이 칸 이름만)
+    const backupVersion = { capturedAt: backup.captured_at ?? null, titleSha256: backup.title_sha256, contentSha256: backup.content_sha256 };
+    const changes = !current ? ['restore_deleted_note']
+      : [sha256(current.title) !== backup.title_sha256 && 'title', sha256(current.content) !== backup.content_sha256 && 'content'].filter(Boolean);
     if (current && sha256(current.content) === backup.content_sha256 && sha256(current.title) === backup.title_sha256) {
       await record('unchanged', 'already_matches_backup', { content_sha256: backup.content_sha256 });
-      return response.status(200).json({ ok: true, restored: false, id, contentSha256: backup.content_sha256, verified: { id: true, owner: true, contentHash: true } });
+      return response.status(200).json({ ok: true, restored: false, id, contentSha256: backup.content_sha256, backupVersion, changes: [], verified: { id: true, owner: true, contentHash: true } });
     }
 
     // 4) 시작 기록(못 쓰면 복원하지 않음)
     if (!(await record('started', before.state, { before_content_sha256: before.content_sha256, content_sha256: backup.content_sha256 }))) {
       return fail(response, 503, 'AUDIT_UNAVAILABLE');
+    }
+
+    // 4-1) 쓰기 직전에 사본을 다시 읽어, 위에서 검증한 사본과 같은지 확인(다르거나 없으면 멈춤)
+    const { data: reread, error: rereadError } = await supabase.from('notes_backup').select(BACKUP_COLUMNS)
+      .eq('public_id', id).eq('owner_id', ownerKey).maybeSingle();
+    if (rereadError || !reread || reread.title_sha256 !== backup.title_sha256 || reread.content_sha256 !== backup.content_sha256
+        || sha256(reread.content) !== backup.content_sha256 || sha256(reread.title) !== backup.title_sha256
+        || (reread.captured_at ?? null) !== (backup.captured_at ?? null)) {
+      await record('rejected', 'backup_reread_mismatch');
+      return fail(response, 409, 'BACKUP_UNVERIFIED');
     }
 
     // 5) 한 건만 복원
@@ -141,8 +157,8 @@ export default async function handler(request, response) {
     // 7) 결과 감사 기록. 메모는 이미 복원됐으므로 되돌리지 않고, 결과 기록이 빠졌다는 사실을 응답(auditRecorded)과 로그에 남깁니다.
     const auditRecorded = await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
     if (!auditRecorded) console.warn('[restore] result audit missing');
-    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', id, verified, auditRecorded });
-    return response.status(200).json({ ok: true, restored: true, id, contentSha256: backup.content_sha256, verified, auditRecorded });
+    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', id, backupVersion, changes, verified, auditRecorded });
+    return response.status(200).json({ ok: true, restored: true, id, contentSha256: backup.content_sha256, backupVersion, changes, backupReread: true, verified, auditRecorded });
   } catch {
     return fail(response, 500, 'RESTORE_SERVER_ERROR');
   }

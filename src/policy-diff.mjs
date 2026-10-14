@@ -115,6 +115,12 @@ export function verifyBaseline(root, { useGit = true } = {}) {
   let provenance = 'pinned_digest_only';
   if (useGit && git(root, ['rev-parse', '--is-inside-work-tree'])?.trim() === 'true') {
     if (git(root, ['cat-file', '-e', `${TRUSTED_BASELINE.commit}^{commit}`]) === null) {
+      // 얕은 복제(git clone --depth 1)에는 옛 커밋이 없습니다. 이때는 코드에 고정한 manifest 지문과
+      // 파일별 지문 검증(위에서 통과)만으로 판단하고, 출처를 'pinned_digest_shallow'로 밝힙니다.
+      // 전체 기록이 있는데 기준 커밋만 없다면 기록이 바뀐 것이므로 멈춥니다.
+      if (git(root, ['rev-parse', '--is-shallow-repository'])?.trim() === 'true') {
+        return { ok: true, manifest, baseline, provenance: 'pinned_digest_shallow' };
+      }
       return fail('Git 기록에 기준 커밋이 없습니다');
     }
     for (const path of POLICY_FILES) {

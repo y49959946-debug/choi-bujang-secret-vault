@@ -18,7 +18,7 @@ if (process.argv.includes('--json')) {
     process.stdout.write(`${out.join('\n')}\n`);
     process.exit(1);
   }
-  out.push(`  검증: 통과 (${report.baseline.provenance === 'git_commit_verified' ? '지문 + 기준 커밋 내용 대조' : '지문만, Git 기록 없음'})`, '');
+  out.push(`  검증: 통과 (${{ git_commit_verified: '지문 + 기준 커밋 내용 대조', pinned_digest_shallow: '고정 지문만, 얕은 복제라 기준 커밋 대조 불가' }[report.baseline.provenance] ?? '고정 지문만, Git 기록 없음'})`, '');
   out.push('[현재 시험 정책]', '  출처: 작업 폴더(working_tree) — 배포된 운영 정책이나 Supabase 실제 RLS가 아닙니다');
   if (report.current.commit) out.push(`  현재 커밋: ${report.current.commit}`);
   if (report.current.policyFilesUncommitted !== undefined) out.push(`  커밋 안 된 정책 변경: ${report.current.policyFilesUncommitted ? '있음' : '없음'}`);

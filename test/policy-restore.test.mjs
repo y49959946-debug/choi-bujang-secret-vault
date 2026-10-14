@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { applyRestorePlan, buildRestorePlan, readAuditLog, AUDIT_LOG } from '../src/policy-restore.mjs';
 
@@ -196,10 +197,51 @@ test('CRLF 파일은 CRLF 그대로 되돌린다(줄바꿈 때문에 계속 차�
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('실제 저장소: 복구 경로가 등록돼 있으면 되돌리기는 지우지 않고 검토 필요로 멈춘다', () => {
+test('실제 저장소: 사본을 다시 읽어 검증한 내역과 버전을 보여 주고, 등록된 복구 경로는 보존한다', () => {
   const plan = buildRestorePlan(repo);
-  assert.equal(plan.status, 'NEEDS_REVIEW');
-  assert.match(plan.reason, /restoreRoute/u);
+  assert.equal(plan.status, 'NOTHING_TO_RESTORE');
+  assert.equal(plan.baselineId, 'step9-195d38a');
+  assert.equal(plan.verification.files.length, 6);
+  assert.ok(plan.verification.files.every((f) => /^[0-9a-f]{64}$/u.test(f.sha256)));
+  assert.equal(plan.preserved.restoreRoute, 'POST /api/restore');
+  assert.equal(plan.writeCount, 0);
+});
+
+test('침해 뒤 되돌려도 등록된 복구 경로(restoreRoute·allowedRoutes)는 지우지 않는다', async () => {
+  const dir = workspace();
+  try {
+    tamper(dir);
+    edit(dir, 'aleph.config.json', (s) => { const c = JSON.parse(s); c.allowedRoutes.push('POST /api/restore'); c.restoreRoute = 'POST /api/restore'; return `${JSON.stringify(c, null, 2)}\n`; });
+    const plan = buildRestorePlan(dir, opts);
+    assert.equal(plan.status, 'READY_TO_APPLY');
+    const allowed = plan.targets.configFields.find((c) => c.field === 'allowedRoutes');
+    assert.deepEqual(allowed.added, ['GET /api/export'], '침해로 더해진 경로만 지울 대상');
+    const result = await applyRestorePlan(dir, plan.planDigest, { ...opts, runRegression: false });
+    assert.equal(result.status, 'RESTORED');
+    const config = JSON.parse(read(dir, 'aleph.config.json'));
+    assert.equal(config.restoreRoute, 'POST /api/restore');
+    assert.ok(config.allowedRoutes.includes('POST /api/restore'));
+    assert.ok(!config.allowedRoutes.includes('GET /api/export'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('얕은 복제(--depth 1)에서도 사본은 고정 지문으로 검증되고, 사본이 변조되면 멈춘다', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'policy-shallow-'));
+  try {
+    const sh = (args, cwd = dir) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const src = join(dir, 'src-repo');
+    cpSync(repo, src, { recursive: true, filter: (p) => !SKIP.has(p.slice(repo.length + 1).split(/[\\/]/u)[0]) });
+    sh(['init', '-q'], src); sh(['add', '-A'], src);
+    sh(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 't'], src);
+    sh(['clone', '-q', '--depth', '1', `file://${src}`, 'clone']);
+    const clone = join(dir, 'clone');
+    const plan = buildRestorePlan(clone);
+    assert.equal(plan.verification?.provenance, 'pinned_digest_shallow');
+    edit(clone, 'recovery/baselines/step9/policy/src/decider.mjs', (s) => `${s}\n// 사본 변조\n`);
+    const broken = buildRestorePlan(clone);
+    assert.equal(broken.status, 'INVALID_BASELINE');
+    assert.equal(broken.targets, undefined, '검증 실패면 바뀔 항목을 만들지 않음');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('되돌릴 것이 없으면 실행하지 않는다', async () => {

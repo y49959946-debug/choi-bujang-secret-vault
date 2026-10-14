@@ -81,6 +81,8 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
       let r = await env.restore('POST', '/api/restore', tb, { id: b1 });
       check(G2, '변조 뒤 복구: 200, verified의 ID·소유자·내용 해시 모두 true', r.code === 200 && r.body?.restored === true
         && r.body?.verified?.id === true && r.body?.verified?.owner === true && r.body?.verified?.contentHash === true, `HTTP ${r.code}`);
+      check(G2, '변조 뒤 복구: 쓰기 직전 사본을 다시 읽어 검증, 사본 버전·바뀐 칸을 응답', r.body?.backupReread === true
+        && Boolean(r.body?.backupVersion?.capturedAt) && JSON.stringify(r.body?.changes) === '["title","content"]');
       check(G2, '변조 뒤 복구: 그 한 건의 ID·소유자·제목·내용 해시가 사본과 같음', sameAsBackup(b1));
       check(G2, '변조 뒤 복구: 다른 메모는 그대로', others(b1) === keep);
       check(G2, '복구 응답에 메모 본문 없음', !JSON.stringify(r.body).includes('침해 전'));
