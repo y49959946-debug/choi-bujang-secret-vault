@@ -48,6 +48,10 @@
     {
       "source": "/api/auth/:action",
       "destination": "/api/auth?action=:action"
+    },
+    {
+      "source": "/api/device/:action",
+      "destination": "/api/device?action=:action"
     }
   ]
 }

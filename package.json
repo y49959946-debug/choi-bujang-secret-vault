@@ -17,13 +17,16 @@
     "owner:check": "node scripts/owner-check.mjs",
     "test:restore": "node --test test/restore.test.mjs",
     "recovery:recheck": "node scripts/recovery-recheck.mjs",
-    "test:app": "node --test test/app-shell.test.mjs"
+    "test:app": "node --test test/app-shell.test.mjs",
+    "test:device": "node --test test/device.test.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "@simplewebauthn/server": "14.0.3",
     "@supabase/supabase-js": "2.117.2",
+    "@vercel/functions": "3.10.1",
     "jose": "6.2.12"
   }
 }

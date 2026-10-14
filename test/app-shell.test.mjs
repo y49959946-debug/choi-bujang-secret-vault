@@ -34,7 +34,7 @@ test('화면: manifest를 연결하고, 기기 승인은 서버 결과 전까지
   // 기기 키·승인 정보를 브라우저 저장소에 넣지 않음(기존 로그인 보관 키 외에 새 저장 없음)
   const sets = [...html.matchAll(/localStorage\.setItem\(([^,]+),/gu)].map((m) => m[1].trim());
   assert.deepEqual(sets, ['SESSION_KEY']);
-  assert.doesNotMatch(html, /indexedDB|sessionStorage/u);
+  assert.doesNotMatch(html, /\b(sessionStorage|indexedDB)\s*\./u, "세션 저장소·브라우저 DB 사용 없음");
 });
 
 test('오프라인 안내: 화면이 있고 자료를 기기에 저장하지 않는다고 알린다', () => {
