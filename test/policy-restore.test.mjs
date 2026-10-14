@@ -14,6 +14,10 @@ function workspace() {
   cpSync(repo, dir, { recursive: true, filter: (src) => !SKIP.has(src.slice(repo.length + 1).split(/[\\/]/u)[0]) });
   rmSync(join(dir, 'recovery/audit'), { recursive: true, force: true });
   symlinkSync(join(repo, 'node_modules'), join(dir, 'node_modules'), 'junction');
+  // 시나리오는 9단계 정책 상태에서 시작합니다(10단계 복구 경로 등록 전). step 등 다른 칸은 그대로 둡니다.
+  const baseline = JSON.parse(readFileSync(join(dir, 'recovery/baselines/step9/policy/config/policy-fields.json'), 'utf8'));
+  const config = JSON.parse(readFileSync(join(dir, 'aleph.config.json'), 'utf8'));
+  writeFileSync(join(dir, 'aleph.config.json'), `${JSON.stringify({ ...config, ...baseline }, null, 2)}\n`);
   return dir;
 }
 const read = (dir, path) => readFileSync(join(dir, path), 'utf8');
@@ -190,6 +194,12 @@ test('CRLF 파일은 CRLF 그대로 되돌린다(줄바꿈 때문에 계속 차�
     assert.ok(read(dir, 'src/decider.mjs').includes('\r\n'));
     assert.equal(buildRestorePlan(dir, opts).status, 'NOTHING_TO_RESTORE');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('실제 저장소: 복구 경로가 등록돼 있으면 되돌리기는 지우지 않고 검토 필요로 멈춘다', () => {
+  const plan = buildRestorePlan(repo);
+  assert.equal(plan.status, 'NEEDS_REVIEW');
+  assert.match(plan.reason, /restoreRoute/u);
 });
 
 test('되돌릴 것이 없으면 실행하지 않는다', async () => {

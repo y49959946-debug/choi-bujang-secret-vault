@@ -14,7 +14,8 @@
     "policy:diff": "node scripts/policy-diff.mjs",
     "test:policy": "node --test test/policy-diff.test.mjs test/policy-restore.test.mjs",
     "policy:restore": "node scripts/policy-restore.mjs",
-    "owner:check": "node scripts/owner-check.mjs"
+    "owner:check": "node scripts/owner-check.mjs",
+    "test:restore": "node --test test/restore.test.mjs"
   },
   "engines": {
     "node": ">=22"

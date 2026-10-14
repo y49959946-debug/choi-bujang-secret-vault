@@ -13,9 +13,16 @@ function workspace() {
   const dir = mkdtempSync(join(tmpdir(), 'policy-diff-'));
   for (const path of [...POLICY_FILES, 'aleph.config.json']) cpSync(join(repo, path), join(dir, path), { recursive: true });
   cpSync(join(repo, TRUSTED_BASELINE.dir), join(dir, TRUSTED_BASELINE.dir), { recursive: true });
+  resetPolicyFields(dir);
   return dir;
 }
 // 이 PC가 CRLF로 체크아웃했어도 같은 변조가 만들어지도록, 바꾸기 전에 줄바꿈을 LF로 맞춥니다.
+// 시나리오 시험은 9단계 정책 상태에서 시작합니다(설정의 정책 칸을 사본 값으로 맞춤, step 등 다른 칸은 그대로).
+function resetPolicyFields(dir) {
+  const baseline = JSON.parse(readFileSync(join(dir, TRUSTED_BASELINE.dir, 'policy/config/policy-fields.json'), 'utf8'));
+  const config = JSON.parse(readFileSync(join(dir, 'aleph.config.json'), 'utf8'));
+  writeFileSync(join(dir, 'aleph.config.json'), `${JSON.stringify({ ...config, ...baseline }, null, 2)}\n`);
+}
 const edit = (dir, path, fn) => writeFileSync(join(dir, path), fn(readFileSync(join(dir, path), 'utf8').replace(/\r\n/gu, '\n')));
 function snapshot(dir) {
   const out = {};
@@ -24,12 +31,16 @@ function snapshot(dir) {
   walk(dir); return out;
 }
 
-test('실제 저장소: 사본이 기준 커밋과 대조되고, 9단계 이후 정책 차이가 없다', () => {
+test('실제 저장소: 사본이 기준 커밋과 대조되고, 9단계 이후 정책 차이는 10단계 복구 경로 등록뿐이다', () => {
   const report = diffPolicy(repo);
   assert.equal(report.baseline.verified, true);
   assert.equal(report.baseline.provenance, 'git_commit_verified');
-  assert.equal(report.status, 'UNCHANGED');
   assert.equal(report.writeCount, 0);
+  // 정책 파일 6개는 9단계 그대로이고, 설정은 제작 3에서 넣은 복구 경로만 다릅니다.
+  assert.deepEqual(report.changes.filter((c) => c.kind === 'file'), []);
+  assert.deepEqual(report.changes.map((c) => c.field).sort(), ['allowedRoutes', 'restoreRoute']);
+  assert.deepEqual(report.changes.find((c) => c.field === 'allowedRoutes').added, ['POST /api/restore']);
+  assert.equal(report.changes.find((c) => c.field === 'restoreRoute').current, 'POST /api/restore');
 });
 
 test('차이 없음: 정책이 같으면 UNCHANGED, step 변경은 정책 차이가 아니다', () => {

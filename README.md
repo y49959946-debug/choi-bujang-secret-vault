@@ -131,6 +131,33 @@
 - **회수 제안:** 판정기 응답과 별도로 `{ action: 'propose_revocation', reasonCode: 'burst_read', subject, deviceId }`를 냅니다. 대상은 그 구간에서 조회를 가장 많이 보낸 확인된 기기 한 개이고, 같은 사용자의 정상 기기는 넣지 않습니다. 회수 API를 부르거나 기기 권한을 바꾸지 않으며, 실제 회수와 경과 시간은 엔진·심판이 확인합니다.
 - **확인 방법:** `npm run detect:test`(6항목 통과). 가상 시험에서 낯선 네트워크+121건 이상은 대상 기기와 함께 회수 제안, 평소 네트워크 200건·낯선 지역만·조회 30건·10분 밖 분산·정상 기기는 `observe`였습니다. 이 결과는 로컬 연습이며 실제 회수나 심판 판정이 아닙니다.
 
+### 10단계 · 침해 전 사본으로 복구합니다
+
+- **안전 정책 차이 보기 (`npm run policy:diff`):** 9단계 저장점 커밋(`195d38a`)에서 꺼낸 정책 사본(`recovery/baselines/step9`)을 형식·지문·기준 커밋 내용으로 검증한 뒤, 작업 폴더의 시험 정책과 차이만 보여 줍니다. 쓰기 0건이며, 사본 검증에 실패하면 멈춥니다.
+- **정책 되돌리기 (`npm run policy:restore`):** 기본은 미리보기(바뀔 항목·보존 항목·계획 지문)이고, `-- --apply --plan <지문>`일 때만 바뀐 정책 파일과 설정 칸(`allowedRoutes`·`identityProvider`·`originalApiUrl`)을 사본으로 되돌립니다. `judgeIssuer`·`step`·다른 서비스 파일은 보존하고, 감사 기록은 `recovery/audit/restore-log.jsonl`에 덧붙이기만 합니다. `restoreRoute`가 등록돼 있으면 복구 경로를 지우지 않도록 멈춥니다.
+
+#### 메모 한 건 복구 서비스
+
+| 항목 | 내용 |
+|---|---|
+| 서비스 | `api/restore.js` (Vercel 서버 함수) |
+| 경로 | `POST /api/restore` (`aleph.config.json`의 `restoreRoute`, `allowedRoutes`에 등록) |
+| 요청 | `Authorization: Bearer <로그인 토큰>`, 본문 `{ "id": "<메모 UUID>" }` 하나만(다른 칸·쿼리는 400) |
+| 응답 | `{ ok, restored, id, contentSha256, verified: { id, owner, contentHash } }` — 메모 본문은 돌려주지 않음 |
+| 비공개 사본 | `public.notes_backup` — 메모가 처음 만들어질 때 DB 트리거가 제목·내용과 SHA-256을 한 번만 저장. 이후 수정·삭제는 사본에 반영되지 않음. anon·authenticated 권한 없음 |
+| 감사 기록 | `public.restore_audit` — 시작·결과·해시만 덧붙임(DB 트리거가 수정·삭제 금지). 메모 본문·토큰 없음 |
+
+- **대조:** 복원 전에 사본이 요청자 본인 것인지(ID·소유자), 사본의 제목·내용 해시가 맞는지, 지금 행의 주인이 다른 사람이 아닌지 확인합니다. 하나라도 어긋나면 쓰지 않습니다. 삭제됐으면 그 한 건만 다시 넣고, 변조됐으면 ID·주인 조건을 함께 걸어 그 한 건만 고칩니다. 복원 뒤 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인합니다.
+- **소유자 키:** `src/owner-key.mjs`(메모 API와 같은 규칙). 학생 토큰은 검증된 sub, 심판 토큰은 sub·runId·identity를 묶은 키입니다. 본문의 `owner_id`·`role`은 받지 않습니다.
+- **준비(한 번):** Supabase SQL Editor에서 `supabase/notes-step10-restore.sql`의 ①→②→③을 실행합니다. 사본은 이 SQL을 실행한 뒤 새로 만든 메모부터 생깁니다.
+- **확인(시험 계정 B로만):**
+  1. B로 로그인해 메모를 하나 만듭니다(사본 생성).
+  2. 그 메모를 수정(변조)하거나 삭제합니다.
+  3. B의 토큰으로 `POST /api/restore`에 `{ "id": "<그 메모 id>" }`를 보냅니다.
+  4. 응답의 `verified`가 모두 `true`이고, B 화면에서 메모 내용이 처음 내용으로 돌아와야 합니다.
+  5. A의 토큰으로 같은 요청을 보내면 404이고 아무것도 바뀌지 않아야 합니다.
+- **로컬 시험:** `npm run test:restore`(가짜 DB 9개), `npm run test:policy`(정책 비교·되돌리기 27개), `npm run owner:check`(B→A 403, A 허용). SQL은 PGlite(WebAssembly Postgres)에서 실행해 사본 한 번 생성·해시 일치·감사 기록 수정 금지·권한을 확인했습니다. 이 결과는 로컬 연습이며 심판 판정이 아닙니다.
+
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
 [AGENTS.md](AGENTS.md)를 먼저 읽히고 한 번에 한 제작 단위만 요청하세요. 2단계부터는 자료 보호를 구현할 때 `public/data.json`을 복사하는 1단계 빌드 흐름도 함께 바꿔야 합니다. 3단계 이후의 로그인, 허용 경로, 5단계의 원본 API 주소, 6단계 이후 정책 규칙은 해당 단계 원고와 계약에 맞춰 추가합니다. 비밀번호·토큰·서버 전용 키·실제 학생 기록을 코드, Git, 제출 묶음에 넣지 않습니다.
