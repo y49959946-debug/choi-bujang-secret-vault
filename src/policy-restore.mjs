@@ -22,15 +22,13 @@ import { diffPolicy, verifyBaseline, POLICY_FILES, TRUSTED_BASELINE } from './po
 export const RESTORE_FIELDS = Object.freeze(['allowedRoutes', 'identityProvider', 'originalApiUrl']);
 export const COMPARE_ONLY_FIELDS = Object.freeze(['judgeIssuer']);
 export const GUARDED_FIELDS = Object.freeze(['restoreRoute']);
-// 10단계 제작 3에서 등록한 메모 복구 경로. restoreRoute가 이 값이고 allowedRoutes에도 있으면
-// 정책 되돌리기에서 지우지 않고 보존합니다(되돌리기가 복구 경로를 없애지 않도록). 다른 값이면 검토 필요로 멈춥니다.
+// 10단계 제작 3에서 등록한 메모 복구 경로. restoreRoute 칸에만 적습니다.
+// allowedRoutes는 판정기가 실제로 허용하는 자료 경로만 담는 9단계 안전 정책 칸이라 복구 경로를 넣지 않습니다.
+// restoreRoute가 이 값이면 정책 되돌리기에서 지우지 않고 보존합니다. 다른 값이면 검토 필요로 멈춥니다.
 export const REGISTERED_RESTORE_ROUTE = 'POST /api/restore';
-const restoreRouteRegistered = (config) => config?.restoreRoute === REGISTERED_RESTORE_ROUTE
-  && Array.isArray(config.allowedRoutes) && config.allowedRoutes.includes(REGISTERED_RESTORE_ROUTE);
-// 되돌린 뒤의 설정 칸 값: allowedRoutes는 사본 값에 등록된 복구 경로만 다시 붙입니다.
-function restoredFieldValue(field, baselineValue, config) {
-  if (field === 'allowedRoutes' && restoreRouteRegistered(config) && Array.isArray(baselineValue)
-      && !baselineValue.includes(REGISTERED_RESTORE_ROUTE)) return [...baselineValue, REGISTERED_RESTORE_ROUTE];
+const restoreRouteRegistered = (config) => config?.restoreRoute === REGISTERED_RESTORE_ROUTE;
+// 되돌린 뒤의 설정 칸 값: 사본 값 그대로(allowedRoutes에 복구 경로가 더해져 있으면 그것도 되돌릴 대상).
+function restoredFieldValue(baselineValue) {
   return baselineValue ?? null;
 }
 // 다른 서비스 규칙: 이 명령이 쓰지 않으며, 실행 전후 지문이 같아야 합니다.
@@ -105,7 +103,7 @@ export function buildRestorePlan(root, { useGit = true } = {}) {
 
   const configFields = [];
   for (const field of RESTORE_FIELDS) {
-    const was = restoredFieldValue(field, verified.baseline.config[field], config);
+    const was = restoredFieldValue(verified.baseline.config[field]);
     if (canonical(was) === canonical(config[field] ?? null)) continue;
     const entry = { field, currentSha256: shaJson(config[field] ?? null), restoredSha256: shaJson(was) };
     if (Array.isArray(was) && Array.isArray(config[field])) {
@@ -216,7 +214,7 @@ export async function applyRestorePlan(root, planDigest, { useGit = true, runReg
   }
   if (plan.targets.configFields.length) {
     const next = { ...config };
-    for (const { field } of plan.targets.configFields) next[field] = restoredFieldValue(field, verified.baseline.config[field], config);
+    for (const { field } of plan.targets.configFields) next[field] = restoredFieldValue(verified.baseline.config[field]);
     writes.push({ path: 'aleph.config.json', before: configRaw, after: Buffer.from(withEol(`${JSON.stringify(next, null, 2)}\n`, usesCrlf(configRaw)), 'utf8') });
   }
   const summary = {
@@ -252,7 +250,7 @@ export async function applyRestorePlan(root, planDigest, { useGit = true, runReg
   checks.baselineStillVerified = after.ok;
   checks.restoredTargetsMatch = plan.targets.files.every((t) => lf(readFileSync(join(root, t.path), 'utf8')) === verified.baseline.files[t.path]);
   const { config: configAfter } = readConfig(root);
-  checks.restoredFieldsMatch = plan.targets.configFields.every(({ field }) => canonical(configAfter?.[field] ?? null) === canonical(restoredFieldValue(field, verified.baseline.config[field], config)));
+  checks.restoredFieldsMatch = plan.targets.configFields.every(({ field }) => canonical(configAfter?.[field] ?? null) === canonical(restoredFieldValue(verified.baseline.config[field])));
   checks.preservedConfigUnchanged = configAfter !== null && Object.keys(config).filter((k) => !RESTORE_FIELDS.includes(k))
     .every((k) => canonical(configAfter[k] ?? null) === canonical(config[k] ?? null))
     && Object.keys(configAfter).length === Object.keys(config).length;

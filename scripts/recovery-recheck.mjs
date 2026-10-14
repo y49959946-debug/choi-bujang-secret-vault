@@ -37,10 +37,9 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
   if (report.status === 'INVALID_BASELINE') {
     add(G1, '현재 정책과 사본 비교', '실패', '사본 검증 실패로 비교하지 않음');
   } else {
-    const unexpected = report.changes.filter((c) => !(
-      (c.field === 'allowedRoutes' && c.removed.length === 0 && c.added.length === 1 && c.added[0] === RESTORE_ROUTE)
-      || (c.field === 'restoreRoute' && c.current === RESTORE_ROUTE)));
-    check(G1, '현재 정책이 사본과 같음(차이는 10단계 복구 경로 등록뿐)', unexpected.length === 0,
+    // allowedRoutes는 사본과 똑같아야 합니다(복구 경로는 restoreRoute 칸에만 등록).
+    const unexpected = report.changes.filter((c) => !(c.field === 'restoreRoute' && c.current === RESTORE_ROUTE));
+    check(G1, '현재 정책이 사본과 같음(차이는 restoreRoute 칸의 10단계 복구 경로 등록뿐, allowedRoutes는 사본 그대로)', unexpected.length === 0,
       unexpected.length ? `예상 밖 차이: ${unexpected.map((c) => c.field ?? c.path).join(', ')} → npm run policy:restore 로 미리보기` : `차이 ${report.changes.length}곳 모두 복구 경로 등록`);
   }
 

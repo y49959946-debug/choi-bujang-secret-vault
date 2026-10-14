@@ -134,7 +134,7 @@
 ### 10단계 · 침해 전 사본으로 복구합니다
 
 - **안전 정책 차이 보기 (`npm run policy:diff`):** 9단계 저장점 커밋(`195d38a`)에서 꺼낸 정책 사본(`recovery/baselines/step9`)을 형식·지문·기준 커밋 내용으로 검증한 뒤, 작업 폴더의 시험 정책과 차이만 보여 줍니다. 쓰기 0건이며, 사본 검증에 실패하면 멈춥니다.
-- **정책 되돌리기 (`npm run policy:restore`):** 기본은 미리보기(바뀔 항목·보존 항목·계획 지문)이고, `-- --apply --plan <지문>`일 때만 바뀐 정책 파일과 설정 칸(`allowedRoutes`·`identityProvider`·`originalApiUrl`)을 사본으로 되돌립니다. `judgeIssuer`·`step`·다른 서비스 파일은 보존하고, 감사 기록은 `recovery/audit/restore-log.jsonl`에 덧붙이기만 합니다. `restoreRoute`가 등록돼 있으면 복구 경로를 지우지 않도록 멈춥니다.
+- **정책 되돌리기 (`npm run policy:restore`):** 기본은 미리보기(바뀔 항목·보존 항목·계획 지문)이고, `-- --apply --plan <지문>`일 때만 바뀐 정책 파일과 설정 칸(`allowedRoutes`·`identityProvider`·`originalApiUrl`)을 사본으로 되돌립니다. `judgeIssuer`·`step`·다른 서비스 파일은 보존하고, 감사 기록은 `recovery/audit/restore-log.jsonl`에 덧붙이기만 합니다. `restoreRoute`가 등록된 복구 경로(`POST /api/restore`)면 그대로 보존하고, 다른 값이면 덮어쓰지 않고 멈춥니다. `allowedRoutes`는 9단계 사본 값 그대로 되돌리며 복구 경로를 넣지 않습니다(판정기 구역에 없는 경로라서).
 
 #### 심판 1차 결과와 수정 (커밋 `21898a6`, S10_BACKUP_UNVERIFIED)
 
@@ -155,7 +155,7 @@
 | 항목 | 내용 |
 |---|---|
 | 서비스 | `api/restore.js` (Vercel 서버 함수) |
-| 경로 | `POST /api/restore` (`aleph.config.json`의 `restoreRoute`, `allowedRoutes`에 등록) |
+| 경로 | `POST /api/restore` (`aleph.config.json`의 `restoreRoute`에만 등록. `allowedRoutes`는 판정기가 허용하는 자료 경로만 담는 9단계 안전 정책 칸이라 사본 그대로 둠) |
 | 요청 | `Authorization: Bearer <로그인 토큰>`, 본문 `{ "id": "<메모 UUID>" }` 하나만(다른 칸·쿼리는 400) |
 | 응답 | `{ ok, restored, id, ownerId, titleSha256, contentSha256, restoredNote, backup, backupVersion, changes, backupReread, verified: { id, owner, contentHash }, auditRecorded }`. 같은 값을 `owner`·`owner_id`·`contentHash`·`content_sha256`·`title_sha256` 이름으로도 넣습니다. 맨 위 `id`·`ownerId`·해시는 복구 뒤 DB에서 다시 읽은 행의 값이고, `backup`은 사본의 값입니다. 응답만으로 둘을 대조할 수 있습니다 — 메모 본문은 돌려주지 않음. 결과 감사 기록을 못 남기면 `auditRecorded: false` |
 | 비공개 사본 | `public.notes_backup` — 메모가 처음 만들어질 때 DB 트리거가 제목·내용과 SHA-256을 한 번만 저장. 이후 수정·삭제는 사본에 반영되지 않음. anon·authenticated 권한 없음 |
@@ -183,7 +183,7 @@
 - **미실행:** 실행하지 않았거나 환경이 없어 검증하지 못함. 결과를 짐작해 채우지 않습니다.
 
 1. **사전 백업 다시 읽기:** `npm run policy:diff`로 정책 사본(`recovery/baselines/step9`)의 형식·지문·기준 커밋 내용을 다시 검증합니다. 검증에 실패하면 멈춥니다.
-2. **정책 복귀 확인:** 같은 출력에서 사본과 다른 곳이 10단계 복구 경로 등록(`allowedRoutes`에 `POST /api/restore` 하나 추가, `restoreRoute`)뿐인지 봅니다. 다른 차이가 있으면 `npm run policy:restore`로 미리보기 → `-- --apply --plan <지문>`으로 되돌린 뒤 1부터 다시 합니다.
+2. **정책 복귀 확인:** 같은 출력에서 사본과 다른 곳이 `restoreRoute` 칸의 10단계 복구 경로 등록 하나뿐인지 봅니다(`allowedRoutes`를 포함한 나머지 정책은 사본과 같아야 함). 다른 차이가 있으면 `npm run policy:restore`로 미리보기 → `-- --apply --plan <지문>`으로 되돌린 뒤 1부터 다시 합니다.
 3. **복구 뒤 재시험(로컬):** `npm run recovery:recheck`를 실행합니다. 실패가 하나라도 있으면 종료 코드 1입니다. 시험은 성격이 다른 두 종류입니다.
    - **API 핸들러 시험:** 실제 `api/notes.js`·`api/restore.js` 코드를 불러 가짜 DB(메모리 배열)와 이 실행에서만 만든 가짜 서명 키로 호출합니다. 실제 Vercel·Supabase에는 요청을 보내지 않습니다.
    - **판정기·탐지기 가상 입력 시험:** 계약 모양의 가상 요청을 `decide()`에, 가상 사건을 `detect()`에 직접 넣어 판정과 회수 제안을 봅니다. 실제 기기 등록 확인이나 기기 회수가 아니며, 서비스에 공격 요청을 보낸 것도 아닙니다.

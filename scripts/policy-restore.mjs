@@ -60,7 +60,7 @@ if (args.includes('--apply')) {
         out.push(`  설정 칸 되돌림: aleph.config.json · ${c.field}${c.added ? ` (지울 것 [${c.added.join(', ')}] 되살릴 것 [${c.removed.join(', ')}])` : ''}`);
       }
       out.push('', '[보존 — 바꾸지 않음]');
-      if (plan.preserved.restoreRoute) out.push(`  복구 경로: ${plan.preserved.restoreRoute} (10단계에서 등록, restoreRoute·allowedRoutes에서 지우지 않음)`);
+      if (plan.preserved.restoreRoute) out.push(`  복구 경로: ${plan.preserved.restoreRoute} (10단계에서 등록, restoreRoute에서 지우지 않음)`);
       for (const c of plan.preserved.compareOnly) out.push(`  ${c.field}: 운영 측 값이라 보존${c.differsFromBaseline ? ' (사본과 다름 — 운영 측에 확인하세요)' : ''}`);
       out.push(`  설정의 다른 칸: ${plan.preserved.otherConfigFields.filter((k) => k !== 'judgeIssuer').join(', ')}`);
       out.push(`  다른 서비스 규칙: ${plan.preserved.paths.join(', ')}`);

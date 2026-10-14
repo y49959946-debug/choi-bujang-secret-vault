@@ -41,8 +41,8 @@ test('실제 저장소: 사본이 기준 커밋과 대조되고, 9단계 이후 
   assert.equal(report.writeCount, 0);
   // 정책 파일 6개는 9단계 그대로이고, 설정은 제작 3에서 넣은 복구 경로만 다릅니다.
   assert.deepEqual(report.changes.filter((c) => c.kind === 'file'), []);
-  assert.deepEqual(report.changes.map((c) => c.field).sort(), ['allowedRoutes', 'restoreRoute']);
-  assert.deepEqual(report.changes.find((c) => c.field === 'allowedRoutes').added, ['POST /api/restore']);
+  // allowedRoutes는 9단계 사본 그대로이고, 차이는 restoreRoute 칸의 복구 경로 등록 하나뿐입니다.
+  assert.deepEqual(report.changes.map((c) => c.field), ['restoreRoute']);
   assert.equal(report.changes.find((c) => c.field === 'restoreRoute').current, 'POST /api/restore');
 });
 

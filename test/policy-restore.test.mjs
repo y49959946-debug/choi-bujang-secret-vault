@@ -109,11 +109,11 @@ test('restoreRoute가 사본과 다르면 덮어쓰지 않고 검토 필요로 �
   const dir = workspace();
   try {
     tamper(dir);
-    edit(dir, 'aleph.config.json', (s) => s.replace('"restoreRoute": null', '"restoreRoute": "POST /api/restore"'));
+    edit(dir, 'aleph.config.json', (s) => s.replace('"restoreRoute": null', '"restoreRoute": "POST /api/anything"'));
     const plan = buildRestorePlan(dir, opts);
     assert.equal(plan.status, 'NEEDS_REVIEW');
     assert.equal((await applyRestorePlan(dir, plan.planDigest, opts)).status, 'REFUSED');
-    assert.match(read(dir, 'aleph.config.json'), /POST \/api\/restore/u);
+    assert.match(read(dir, 'aleph.config.json'), /POST \/api\/anything/u);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -207,21 +207,38 @@ test('실제 저장소: 사본을 다시 읽어 검증한 내역과 버전을 �
   assert.equal(plan.writeCount, 0);
 });
 
-test('침해 뒤 되돌려도 등록된 복구 경로(restoreRoute·allowedRoutes)는 지우지 않는다', async () => {
+test('침해 뒤 되돌려도 등록된 복구 경로(restoreRoute)는 지우지 않고, allowedRoutes는 사본 그대로 돌아간다', async () => {
   const dir = workspace();
   try {
     tamper(dir);
-    edit(dir, 'aleph.config.json', (s) => { const c = JSON.parse(s); c.allowedRoutes.push('POST /api/restore'); c.restoreRoute = 'POST /api/restore'; return `${JSON.stringify(c, null, 2)}\n`; });
+    edit(dir, 'aleph.config.json', (s) => { const c = JSON.parse(s); c.restoreRoute = 'POST /api/restore'; return `${JSON.stringify(c, null, 2)}\n`; });
     const plan = buildRestorePlan(dir, opts);
     assert.equal(plan.status, 'READY_TO_APPLY');
+    assert.equal(plan.preserved.restoreRoute, 'POST /api/restore');
     const allowed = plan.targets.configFields.find((c) => c.field === 'allowedRoutes');
     assert.deepEqual(allowed.added, ['GET /api/export'], '침해로 더해진 경로만 지울 대상');
     const result = await applyRestorePlan(dir, plan.planDigest, { ...opts, runRegression: false });
     assert.equal(result.status, 'RESTORED');
     const config = JSON.parse(read(dir, 'aleph.config.json'));
     assert.equal(config.restoreRoute, 'POST /api/restore');
-    assert.ok(config.allowedRoutes.includes('POST /api/restore'));
+    assert.ok(!config.allowedRoutes.includes('POST /api/restore'), '복구 경로는 allowedRoutes에 넣지 않음');
     assert.ok(!config.allowedRoutes.includes('GET /api/export'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('allowedRoutes에 복구 경로가 더해져 있으면 그것도 사본 값으로 되돌릴 대상이다(판정기 구역에 없는 경로)', async () => {
+  const dir = workspace();
+  try {
+    edit(dir, 'aleph.config.json', (s) => { const c = JSON.parse(s); c.allowedRoutes.push('POST /api/restore'); c.restoreRoute = 'POST /api/restore'; return `${JSON.stringify(c, null, 2)}\n`; });
+    const plan = buildRestorePlan(dir, opts);
+    assert.equal(plan.status, 'READY_TO_APPLY');
+    const allowed = plan.targets.configFields.find((c) => c.field === 'allowedRoutes');
+    assert.deepEqual(allowed.added, ['POST /api/restore']);
+    const result = await applyRestorePlan(dir, plan.planDigest, { ...opts, runRegression: false });
+    assert.equal(result.status, 'RESTORED');
+    const config = JSON.parse(read(dir, 'aleph.config.json'));
+    assert.equal(config.restoreRoute, 'POST /api/restore');
+    assert.ok(!config.allowedRoutes.includes('POST /api/restore'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

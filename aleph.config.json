@@ -17,8 +17,7 @@
     "DELETE /api/notes/:id",
     "POST /api/auth/login",
     "POST /api/auth/refresh",
-    "POST /api/auth/logout",
-    "POST /api/restore"
+    "POST /api/auth/logout"
   ],
   "originalApiUrl": "https://yakpkxozjfwnflpizavj.supabase.co/rest/v1/notes",
   "restoreRoute": "POST /api/restore"
