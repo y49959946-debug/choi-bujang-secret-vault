@@ -39,7 +39,7 @@ const BACKUP_COLUMNS = 'public_id, owner_id, title, content, title_sha256, conte
 let verifyLogin = null;
 let db = null;
 
-function fail(response, status, error) {
+function failResponse(response, status, error) {
   return response.status(status).json({ ok: false, error });
 }
 
@@ -60,7 +60,18 @@ async function audit(supabase, row) {
   return !error;
 }
 
+// 진단: 거부할 때마다 요청의 "모양"만 한 줄 남깁니다(값·토큰·ID·본문은 남기지 않음).
+// 감사 기록(restore_audit)은 로그인과 본문 검사를 통과한 요청만 남기므로, 그 전에 거부된 요청은 이 로그로만 보입니다.
+function requestShape(request) {
+  const keys = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).slice(0, 10).join(',') : typeof value);
+  let body = request.body;
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = 'unparsed_string'; } }
+  const auth = request.headers?.authorization;
+  return `method=${request.method} body=[${keys(body)}] query=[${keys(request.query ?? {})}] auth=${typeof auth === 'string' && auth ? (auth.startsWith('Bearer ') ? 'bearer' : 'other') : 'none'} ctype=${String(request.headers?.['content-type'] ?? 'none').split(';')[0].slice(0, 40)}`;
+}
+
 export default async function handler(request, response) {
+  const fail = (res, status, error) => { console.warn(`restore: 거부 ${status} ${error} ${requestShape(request)}`); return failResponse(res, status, error); };
   response.setHeader('Cache-Control', 'no-store');
   response.setHeader('Vary', 'Authorization');
   if (request.method !== 'POST') {
@@ -171,6 +182,7 @@ export default async function handler(request, response) {
     const auditRecorded = await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
     if (!auditRecorded) console.warn('[restore] result audit missing');
     if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', ...evidenceBody(after, backup), backupVersion, changes, verified, auditRecorded });
+    console.warn(`restore: 완료 restored=true changes=${changes.join('+') || 'none'}`);
     return response.status(200).json({ ok: true, restored: true, ...evidenceBody(after, backup), backupVersion, changes, backupReread: true, verified, auditRecorded });
   } catch {
     return fail(response, 500, 'RESTORE_SERVER_ERROR');
