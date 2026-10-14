@@ -4,8 +4,9 @@ import { deploymentIdentity } from './deployment-identity.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const config = JSON.parse(await readFile(resolve(root, 'aleph.config.json'), 'utf8'));
-if (config.step !== 1) {
-  throw new Error('1단계 이후에는 공개 data.json 복사를 끝내고 보호된 자료 API로 바꾸세요.');
+// 2단계부터 공개 data.json 복사를 끝냈으므로, 단계 값은 1~12 정수인지만 확인합니다(8단계: step 8).
+if (!Number.isInteger(config.step) || config.step < 1 || config.step > 12) {
+  throw new Error('aleph.config.json의 step은 1~12 정수여야 합니다.');
 }
 // 2단계: 정적 data.json을 더 이상 배포하지 않습니다. 메모는 /api/notes 서버 함수가 읽습니다.
 // 1단계 확인 표시가 정적 응답에 남지 않도록, 남아 있는 public/data.json도 빌드 결과에서 지웁니다.

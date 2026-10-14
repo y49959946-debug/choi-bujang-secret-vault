@@ -2,7 +2,7 @@
 // 6단계부터 규칙을 하나씩 추가합니다. 이 기본 응답은 모든 요청을 거부합니다.
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
 //
-// 규칙 순서 (계약 docs/DECIDER_REQUEST.md에 있는 값만 읽습니다. request.device·role 같은 없는 값은 쓰지 않습니다.)
+// 규칙 순서 (계약 docs/DECIDER_REQUEST.md에 적힌 요청 이름만 읽고, 계약에 없는 값은 쓰지 않습니다.)
 // 6단계 device_registered: request.deviceRegistered가 true가 아니면 가장 먼저 device_not_registered로 거부합니다.
 // 8단계 resource_zones: 엔진이 확인한 deviceId·subjectId·method·path·route가 맞는 구역 경로만 들입니다.
 //   프로젝트의 모든 자원을 구역으로 나눕니다: 내 메모(owner_notes), 반 공지(class_notices), 강사 자료(instructor_materials).
@@ -28,7 +28,7 @@ const respond = (request, decision, reasonCode, ruleIds) => ({
 // - 'none'은 "접속 정보 없음"입니다. 실제 경로는 region/network가 'unknown'입니다.
 // - 그 밖의 출처(브라우저·클라이언트 헤더 등)나 모양이 틀린 값은 신뢰하지 않습니다.
 // 값이 없거나 출처가 불명확하면 null로 둡니다. 'local'·'usual' 같은 정상값으로 채우지 않습니다.
-// 요청 객체 자신이 가진 값만 읽고, 계약에 없는 headers·geo·identity 같은 칸은 읽지 않습니다.
+// 요청 객체 자신이 가진 값만 읽고, 계약에 없는 칸은 읽지 않습니다.
 // 이 결과는 아래 step_up_required 규칙이 씁니다.
 // recentEvents가 계약 한도(12개)를 넘어도 버리거나 자르지 않고 모양이 맞는 사건을 모두 셉니다.
 // (사건을 많이 넣거나 앞에 빈 사건을 채워 대량 읽기를 숨기지 못하게 합니다.)
@@ -103,7 +103,7 @@ function freshlyVerified(request) {
 // - 경로의 마지막 칸은 자료 ID뿐입니다. :id와 같은 깊이에 export 같은 기능 경로를 두지 않습니다.
 //   메모 ID는 '아는 모양'만 엽니다(허용 목록): 메모 API가 실제로 쓰는 UUID와, 공식 연습 요청의 'demo'뿐입니다.
 //   export·all 같은 기능 이름이나 그 밖의 모르는 ID는 알 수 없는 경로로 거부합니다.
-// - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
+// - 계약에 역할 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
 //   반 공지·강사 자료 구역은 읽기만 됩니다. 쓰기는 notice_write_denied·material_write_denied로 명시적으로 거부합니다.
 // - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
 //   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
