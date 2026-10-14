@@ -5,12 +5,13 @@
 // 규칙 순서 (계약 docs/DECIDER_REQUEST.md에 있는 값만 읽습니다. request.device·role 같은 없는 값은 쓰지 않습니다.)
 // 6단계 device_registered: request.deviceRegistered가 true가 아니면 가장 먼저 device_not_registered로 거부합니다.
 // 8단계 resource_zones: 엔진이 확인한 deviceId·subjectId·method·path·route가 맞는 구역 경로만 들입니다.
-//   owner_notes_zone(내 메모 다섯 경로)만 허용하고, class_notices_zone(강사 공지 구역)·알 수 없는 경로는 거부합니다.
+//   프로젝트의 모든 자원을 구역으로 나눕니다: 내 메모(owner_notes), 반 공지(class_notices), 강사 자료(instructor_materials).
+//   내 메모는 다섯 경로, 반 공지·강사 자료는 읽기(GET)만 허용하고 쓰기는 구역별 거부 사유로, 알 수 없는 경로는 거부합니다.
 // 7단계 step_up_required: 허용될 요청이라도 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
 // 그 밖의 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
 export const RULE_IDS = Object.freeze([
   'starter.deny', 'device_registered', 'step_up_required',
-  'resource_zones', 'owner_notes_zone', 'class_notices_zone',
+  'resource_zones', 'owner_notes_zone', 'class_notices_zone', 'instructor_materials_zone',
 ]);
 
 
@@ -103,7 +104,7 @@ function freshlyVerified(request) {
 //   메모 ID는 '아는 모양'만 엽니다(허용 목록): 메모 API가 실제로 쓰는 UUID와, 공식 연습 요청의 'demo'뿐입니다.
 //   export·all 같은 기능 이름이나 그 밖의 모르는 ID는 알 수 없는 경로로 거부합니다.
 // - 계약에 역할(role) 칸이 없으므로 모든 주체를 일반 학생으로 봅니다. 학생은 자기 메모 구역만 쓰고,
-//   강사 공지 구역은 읽기·수정 모두 거부합니다(저장된 강사 권한과 공지 API가 아직 없습니다).
+//   반 공지·강사 자료 구역은 읽기만 됩니다. 쓰기는 notice_write_denied·material_write_denied로 명시적으로 거부합니다.
 // - 계약에 메모 주인 칸이 없어, "B가 A의 메모"인지는 판정기가 알 수 없습니다. 그 거부는 자료 API(api/notes.js)의
 //   owner_id 검사가 맡고, 판정기는 구역·동작·경로를 막습니다.
 const ITEM_ID = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -123,12 +124,27 @@ const ZONE_ROUTES = Object.freeze({
   'GET /notes/:id': 'owner_notes',
   'PUT /notes/:id': 'owner_notes',
   'DELETE /notes/:id': 'owner_notes',
+  // 반 공지 구역: 읽기만 허용합니다. 쓰기(POST·PUT·PATCH·DELETE)는 아래에서 notice_write_denied로 거부합니다.
+  'GET /notices': 'class_notices',
+  'GET /notices/:id': 'class_notices',
+  // 강사 자료 구역: 읽기만 허용합니다. 쓰기는 아래에서 material_write_denied로 거부합니다.
+  'GET /materials': 'instructor_materials',
+  'GET /materials/:id': 'instructor_materials',
+});
+// 구역별 쓰기 거부: 계약에 역할 칸이 없어 모든 주체를 일반 학생으로 보므로, 공지·강사 자료 쓰기는 누구든 거부합니다.
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const READ_ONLY_ZONES = Object.freeze({
+  notices: Object.freeze({ reasonCode: 'notice_write_denied', ruleId: 'class_notices_zone' }),
+  materials: Object.freeze({ reasonCode: 'material_write_denied', ruleId: 'instructor_materials_zone' }),
+});
+const ZONE_RULES = Object.freeze({
+  owner_notes: 'owner_notes_zone', class_notices: 'class_notices_zone', instructor_materials: 'instructor_materials_zone',
 });
 
 // path → 'GET /notes/:id' 같은 route 모양 (자원 경로가 아니면 null)
 function routeShape(method, path) {
   if (typeof method !== 'string' || typeof path !== 'string' || path.length > 256) return null;
-  const match = /^\/(notes|notices)(?:\/([^/?#]+))?$/u.exec(path);
+  const match = /^\/(notes|notices|materials)(?:\/([^/?#]+))?$/u.exec(path);
   if (!match) return null;
   if (match[2] !== undefined && !ITEM_ID.test(match[2])) return null;
   if (match[1] === 'notes' && match[2] !== undefined
@@ -146,8 +162,10 @@ function zoneFor(request) {
   if (!shape || shape !== route || queryLength !== 0) {
     return { deny: ['route_not_allowed', 'resource_zones'] };
   }
-  if (shape.endsWith(' /notices') || shape.endsWith(' /notices/:id')) {
-    return { deny: ['zone_not_allowed', 'class_notices_zone'] };
+  const collection = shape.split(' ')[1].split('/')[1];
+  const readOnly = READ_ONLY_ZONES[collection];
+  if (readOnly && WRITE_METHODS.has(method)) {
+    return { deny: [readOnly.reasonCode, readOnly.ruleId] };
   }
   if (ownValue(request, 'querySha256') !== EMPTY_QUERY_SHA256) {
     return { deny: ['route_not_allowed', 'resource_zones'] };
@@ -184,7 +202,7 @@ export async function decide(request) {
     if (unusualAccess(readAccessContext(request)) && !freshlyVerified(request)) {
       return respond(request, 'step_up', 'step_up_required', ['step_up_required']);
     }
-    const zoneRule = zoned.zone === 'owner_notes' ? 'owner_notes_zone' : 'class_notices_zone';
+    const zoneRule = ZONE_RULES[zoned.zone];
     return respond(request, 'allow', 'approved', ['device_registered', zoneRule]);
   }
 
