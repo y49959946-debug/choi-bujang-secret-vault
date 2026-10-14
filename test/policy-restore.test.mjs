@@ -68,7 +68,7 @@ test('실행: 검증한 정책으로 되돌리고, B의 A 요청은 다시 403·
     const config = JSON.parse(read(dir, 'aleph.config.json'));
     assert.equal(config.allowedRoutes.includes('GET /api/export'), false);
     assert.equal(config.judgeIssuer, 'https://changed-by-operator.up.railway.app/defense/judge', '운영 측 값은 보존');
-    assert.equal(config.step, 10, 'step은 되돌리지 않음');
+    assert.equal(config.step, JSON.parse(readFileSync(join(repo, 'aleph.config.json'), 'utf8')).step, 'step은 되돌리지 않음');
     assert.equal(read(dir, 'src/detect.mjs'), detectBefore, '다른 서비스 규칙 보존');
     const audit = readAuditLog(dir);
     assert.equal(audit.ok, true);

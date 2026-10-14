@@ -16,7 +16,8 @@
     "policy:restore": "node scripts/policy-restore.mjs",
     "owner:check": "node scripts/owner-check.mjs",
     "test:restore": "node --test test/restore.test.mjs",
-    "recovery:recheck": "node scripts/recovery-recheck.mjs"
+    "recovery:recheck": "node scripts/recovery-recheck.mjs",
+    "test:app": "node --test test/app-shell.test.mjs"
   },
   "engines": {
     "node": ">=22"
