@@ -9,6 +9,8 @@
 //     지금 행이 있으면 그 주인도 요청자인지. 하나라도 어긋나면 아무것도 쓰지 않습니다.
 //   - 쓰기 직전 재검증: 사본을 한 번 더 읽어 처음 검증한 사본(해시·저장 시각)과 같은지 봅니다. 다르거나 없으면 409로 멈춥니다.
 //   - 응답에 사본 버전(backupVersion: 저장 시각·해시)과 바뀐 칸 이름(changes)을 넣습니다. 본문은 넣지 않습니다.
+//   - 응답 맨 위 id·ownerId·titleSha256·contentSha256은 복구 뒤 DB에서 다시 읽은 행의 값, backup은 사본의 값입니다.
+//     심판은 메모를 다시 조회하지 않고 이 응답만으로 ID·소유자·해시가 사본과 같은지 봅니다.
 //   - 복원: 삭제됐으면 그 한 건을 다시 넣고, 변조됐으면 ID·주인 조건을 함께 걸어 그 한 건만 고칩니다.
 //     다른 메모는 건드리지 않습니다.
 //   - 복원 후 대조: 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인하고, 결과만(해시) 응답합니다.
@@ -22,6 +24,16 @@ import { ownerKeyOf } from '../src/owner-key.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const sha256 = (text) => createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
+// 응답에 넣는 증거: 메모 한 건의 ID·소유자·제목/내용 해시(본문은 넣지 않음).
+// 심판이 복구 뒤 메모를 다시 조회하지 않고 이 응답만으로 ID·소유자·해시를 대조할 수 있게 합니다.
+const noteEvidence = (row) => (row ? { id: row.public_id, ownerId: row.owner_id, titleSha256: sha256(row.title), contentSha256: sha256(row.content) } : null);
+const backupEvidence = (b) => ({ id: b.public_id, ownerId: b.owner_id, titleSha256: b.title_sha256, contentSha256: b.content_sha256, capturedAt: b.captured_at ?? null });
+// 복구 결과 응답: 맨 위 id·ownerId·contentSha256은 "복구 뒤 DB에서 다시 읽은 행"의 값이고, backup은 사본의 값입니다.
+const evidenceBody = (row, backup) => {
+  const note = noteEvidence(row);
+  return { id: note?.id ?? backup.public_id, ownerId: note?.ownerId ?? null, titleSha256: note?.titleSha256 ?? null,
+    contentSha256: note?.contentSha256 ?? null, restoredNote: note, backup: backupEvidence(backup) };
+};
 const BACKUP_COLUMNS = 'public_id, owner_id, title, content, title_sha256, content_sha256, created_at, captured_at';
 
 let verifyLogin = null;
@@ -115,7 +127,8 @@ export default async function handler(request, response) {
       : [sha256(current.title) !== backup.title_sha256 && 'title', sha256(current.content) !== backup.content_sha256 && 'content'].filter(Boolean);
     if (current && sha256(current.content) === backup.content_sha256 && sha256(current.title) === backup.title_sha256) {
       await record('unchanged', 'already_matches_backup', { content_sha256: backup.content_sha256 });
-      return response.status(200).json({ ok: true, restored: false, id, contentSha256: backup.content_sha256, backupVersion, changes: [], verified: { id: true, owner: true, contentHash: true } });
+      return response.status(200).json({ ok: true, restored: false, ...evidenceBody(current, backup), backupVersion, changes: [],
+        verified: { id: current.public_id === backup.public_id, owner: current.owner_id === backup.owner_id, contentHash: true } });
     }
 
     // 4) 시작 기록(못 쓰면 복원하지 않음)
@@ -157,8 +170,8 @@ export default async function handler(request, response) {
     // 7) 결과 감사 기록. 메모는 이미 복원됐으므로 되돌리지 않고, 결과 기록이 빠졌다는 사실을 응답(auditRecorded)과 로그에 남깁니다.
     const auditRecorded = await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
     if (!auditRecorded) console.warn('[restore] result audit missing');
-    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', id, backupVersion, changes, verified, auditRecorded });
-    return response.status(200).json({ ok: true, restored: true, id, contentSha256: backup.content_sha256, backupVersion, changes, backupReread: true, verified, auditRecorded });
+    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', ...evidenceBody(after, backup), backupVersion, changes, verified, auditRecorded });
+    return response.status(200).json({ ok: true, restored: true, ...evidenceBody(after, backup), backupVersion, changes, backupReread: true, verified, auditRecorded });
   } catch {
     return fail(response, 500, 'RESTORE_SERVER_ERROR');
   }

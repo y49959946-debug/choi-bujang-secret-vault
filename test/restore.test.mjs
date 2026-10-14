@@ -104,6 +104,14 @@ test('변조된 B 메모: B가 복원하면 그 한 건의 ID·소유자·내용
   assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true });
   assert.equal(r.body.auditRecorded, true);
   assert.equal(r.body.backupReread, true);
+  // 응답만으로 ID·소유자·해시 대조(심판은 다시 조회하지 않음)
+  const bk = env.db.notes_backup.find((b) => b.public_id === env.id);
+  assert.equal(r.body.id, bk.public_id);
+  assert.equal(r.body.ownerId, bk.owner_id);
+  assert.equal(r.body.contentSha256, bk.content_sha256);
+  assert.equal(r.body.titleSha256, bk.title_sha256);
+  assert.deepEqual(r.body.restoredNote, { id: bk.public_id, ownerId: bk.owner_id, titleSha256: bk.title_sha256, contentSha256: bk.content_sha256 });
+  assert.equal(r.body.backup.ownerId, bk.owner_id);
   assert.deepEqual(r.body.changes, ['title', 'content']);
   assert.match(String(r.body.backupVersion?.capturedAt), /^\d{4}-/u);
   const row = env.db.notes.find((n) => n.public_id === env.id);
@@ -128,6 +136,8 @@ test('삭제된 B 메모: 그 한 건만 다시 넣고 ID·소유자·해시가 
   const row = env.db.notes.find((n) => n.public_id === env.id);
   assert.equal(row.owner_id, env.db.notes_backup.find((b) => b.public_id === env.id).owner_id);
   assert.equal(sha(row.content), sha(ORIGINAL.body));
+  assert.equal(r.body.ownerId, row.owner_id, '삭제 뒤 복구 응답에도 소유자');
+  assert.equal(r.body.contentSha256, sha(ORIGINAL.body), '삭제 뒤 복구 응답에도 내용 해시');
   const read = await env.notes('GET', `/api/notes/${env.id}`, env.tb);
   assert.equal(read.code, 200, 'B는 복원한 메모를 다시 읽을 수 있음');
 });
@@ -235,5 +245,7 @@ test('심판 시험 계정 A·B(같은 sub): 메모 API와 같은 소유자 키�
   assert.equal((await env.restore('POST', '/api/restore', ja, { id: made.body.id })).code, 404, '심판 A는 B 메모 복원 불가');
   const r = await env.restore('POST', '/api/restore', jb, { id: made.body.id });
   assert.equal(r.code, 200, '메모 API가 저장한 소유자 키와 복원 API의 소유자 키가 같음');
+  const bk = env.db.notes_backup.find((b) => b.public_id === made.body.id);
+  assert.deepEqual([r.body.id, r.body.ownerId, r.body.contentSha256], [bk.public_id, bk.owner_id, bk.content_sha256], '심판 B: 응답만으로 ID·소유자·해시 일치');
   assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true });
 });

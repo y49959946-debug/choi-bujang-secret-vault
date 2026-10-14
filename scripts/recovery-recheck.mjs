@@ -83,6 +83,9 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
         && r.body?.verified?.id === true && r.body?.verified?.owner === true && r.body?.verified?.contentHash === true, `HTTP ${r.code}`);
       check(G2, '변조 뒤 복구: 쓰기 직전 사본을 다시 읽어 검증, 사본 버전·바뀐 칸을 응답', r.body?.backupReread === true
         && Boolean(r.body?.backupVersion?.capturedAt) && JSON.stringify(r.body?.changes) === '["title","content"]');
+      const answered = (res, id) => res.body?.id === backup(id).public_id && res.body?.ownerId === backup(id).owner_id
+        && res.body?.contentSha256 === backup(id).content_sha256 && res.body?.titleSha256 === backup(id).title_sha256;
+      check(G2, '변조 뒤 복구: 응답만으로 ID·소유자·제목·내용 해시가 사본과 같음(다시 조회 없이)', answered(r, b1));
       check(G2, '변조 뒤 복구: 그 한 건의 ID·소유자·제목·내용 해시가 사본과 같음', sameAsBackup(b1));
       check(G2, '변조 뒤 복구: 다른 메모는 그대로', others(b1) === keep);
       check(G2, '복구 응답에 메모 본문 없음', !JSON.stringify(r.body).includes('침해 전'));
@@ -94,6 +97,7 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
       r = await env.restore('POST', '/api/restore', tb, { id: b2 });
       check(G2, '삭제 뒤 복구: 200, verified 모두 true', r.code === 200 && r.body?.restored === true
         && r.body?.verified?.contentHash === true, `HTTP ${r.code}`);
+      check(G2, '삭제 뒤 복구: 응답만으로 ID·소유자·제목·내용 해시가 사본과 같음(다시 조회 없이)', answered(r, b2));
       check(G2, '삭제 뒤 복구: 한 건만 다시 들어가고 ID·소유자·해시가 사본과 같음',
         sameAsBackup(b2) && env.db.notes.length === JSON.parse(keep).length + 1);
       r = await env.restore('POST', '/api/restore', tb, { id: b2 });
