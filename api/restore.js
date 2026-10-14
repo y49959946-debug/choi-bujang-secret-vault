@@ -15,7 +15,11 @@
 //     다른 메모는 건드리지 않습니다.
 //   - 복원 후 대조: 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인하고, 결과만(해시) 응답합니다.
 //   - 감사 기록: public.restore_audit에 시작·결과를 덧붙이기만 합니다(DB 트리거로 수정·삭제 금지).
-//     시작 기록을 쓸 수 없으면 복원하지 않습니다. 메모 본문·토큰은 기록하지 않습니다.
+//     시작 기록을 쓸 수 없으면 복원하지 않습니다. 결과 기록을 쓸 수 없으면(한 번 다시 시도해도 실패)
+//     방금 쓴 그 한 건을 복구 전 상태로 되돌리고 503으로 멈춥니다. 감사 기록 없이 복원이 남지 않습니다.
+//     메모 본문·토큰은 기록하지 않습니다.
+//   - 보존 확인: 복원 전후로 이 메모의 이전 감사 기록이 모두 그대로인지(지워지거나 바뀐 줄 없음)와,
+//     같은 소유자의 다른 메모 지문(ID·제목/내용 해시)이 같은지 확인해 응답(audit·scope·verified)에 넣습니다.
 import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
@@ -40,6 +44,20 @@ const evidenceBody = (row, backup) => {
     restoredNote: note, backup: backupEvidence(backup) };
 };
 const BACKUP_COLUMNS = 'public_id, owner_id, title, content, title_sha256, content_sha256, created_at, captured_at';
+
+// 이 메모의 감사 기록 번호 목록(복원 전후 비교용). 읽지 못하면 null.
+async function auditEntryIds(supabase, id) {
+  const { data, error } = await supabase.from('restore_audit').select('id').eq('public_id', id);
+  if (error || !Array.isArray(data)) return null;
+  return data.map((r) => String(r.id)).sort();
+}
+// 같은 소유자의 "다른" 메모 지문(ID·제목/내용 해시만, 본문은 남기지 않음). 읽지 못하면 null.
+async function otherNotesFingerprint(supabase, ownerKey, id) {
+  const { data, error } = await supabase.from('notes').select('public_id, title, content').eq('owner_id', ownerKey);
+  if (error || !Array.isArray(data)) return null;
+  const rows = data.filter((r) => r.public_id !== id).map((r) => `${r.public_id}:${sha256(r.title)}:${sha256(r.content)}`).sort();
+  return { count: rows.length, sha256: sha256(rows.join('\n')) };
+}
 
 let verifyLogin = null;
 let db = null;
@@ -129,7 +147,7 @@ export default async function handler(request, response) {
       return fail(response, 409, 'BACKUP_INTEGRITY_FAILED');
     }
     // 3) 지금 행의 주인 확인(다른 사람 행이면 덮어쓰지 않음)
-    const { data: current, error: currentError } = await supabase.from('notes').select('public_id, owner_id, title, content')
+    const { data: current, error: currentError } = await supabase.from('notes').select('public_id, owner_id, title, content, updated_at')
       .eq('public_id', id).maybeSingle();
     if (currentError) return fail(response, 502, 'RESTORE_DB_FAILED');
     if (current && current.owner_id !== ownerKey) {
@@ -146,6 +164,11 @@ export default async function handler(request, response) {
       return response.status(200).json({ ok: true, restored: false, ...evidenceBody(current, backup), backupVersion, changes: [],
         verified: { id: current.public_id === backup.public_id, owner: current.owner_id === backup.owner_id, contentHash: true } });
     }
+
+    // 3-1) 보존 기준: 이 메모의 이전 감사 기록 번호, 같은 소유자의 다른 메모 지문. 못 읽으면 쓰지 않음.
+    const auditBefore = await auditEntryIds(supabase, id);
+    const othersBefore = await otherNotesFingerprint(supabase, ownerKey, id);
+    if (!auditBefore || !othersBefore) return fail(response, 502, 'RESTORE_DB_FAILED');
 
     // 4) 시작 기록(못 쓰면 복원하지 않음)
     if (!(await record('started', before.state, { before_content_sha256: before.content_sha256, content_sha256: backup.content_sha256 }))) {
@@ -175,20 +198,57 @@ export default async function handler(request, response) {
       if (error) { await record('failed', error.code === '23505' ? 'insert_conflict' : 'insert_failed'); return fail(response, 409, 'RESTORE_CONFLICT'); }
     }
 
-    // 6) 복원 후 대조
+    // 6) 복원 후 대조: 그 한 건의 ID·소유자·해시, 그리고 다른 메모가 그대로인지
     const { data: after } = await supabase.from('notes').select('public_id, owner_id, title, content').eq('public_id', id).maybeSingle();
+    const othersAfter = await otherNotesFingerprint(supabase, ownerKey, id);
+    const otherNotesUnchanged = Boolean(othersAfter) && othersAfter.count === othersBefore.count && othersAfter.sha256 === othersBefore.sha256;
     const verified = {
       id: after?.public_id === backup.public_id,
       owner: after?.owner_id === backup.owner_id,
       contentHash: sha256(after?.content) === backup.content_sha256 && sha256(after?.title) === backup.title_sha256,
+      otherNotesUnchanged,
     };
-    const ok = verified.id && verified.owner && verified.contentHash;
-    // 7) 결과 감사 기록. 메모는 이미 복원됐으므로 되돌리지 않고, 결과 기록이 빠졌다는 사실을 응답(auditRecorded)과 로그에 남깁니다.
-    const auditRecorded = await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
-    if (!auditRecorded) console.warn('[restore] result audit missing');
-    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', ...evidenceBody(after, backup), backupVersion, changes, verified, auditRecorded });
-    console.warn(`restore: 완료 restored=true changes=${changes.join('+') || 'none'}`);
-    return response.status(200).json({ ok: true, restored: true, ...evidenceBody(after, backup), backupVersion, changes, backupReread: true, verified, auditRecorded });
+    const ok = verified.id && verified.owner && verified.contentHash && otherNotesUnchanged;
+    const resultName = ok ? 'restored' : 'verify_failed';
+    const resultReason = ok ? 'matches_backup' : 'after_mismatch';
+    const resultExtra = { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) };
+
+    // 7) 결과 감사 기록. 한 번 다시 시도해도 못 쓰면, 감사 기록 없는 복원을 남기지 않도록 그 한 건을 복구 전 상태로 되돌리고 멈춥니다.
+    let auditRecorded = await record(resultName, resultReason, resultExtra);
+    if (!auditRecorded) auditRecorded = await record(resultName, resultReason, resultExtra);
+    if (!auditRecorded) {
+      let rolledBack = false;
+      if (current) {
+        const { error } = await supabase.from('notes')
+          .update({ title: current.title, content: current.content, ...(current.updated_at ? { updated_at: current.updated_at } : {}) })
+          .eq('public_id', id).eq('owner_id', ownerKey);
+        const { data: back } = await supabase.from('notes').select('title, content').eq('public_id', id).maybeSingle();
+        rolledBack = !error && sha256(back?.title) === sha256(current.title) && sha256(back?.content) === sha256(current.content);
+      } else {
+        const { error } = await supabase.from('notes').delete().eq('public_id', id).eq('owner_id', ownerKey);
+        const { data: back } = await supabase.from('notes').select('public_id').eq('public_id', id).maybeSingle();
+        rolledBack = !error && !back;
+      }
+      console.warn(`restore: 거부 503 AUDIT_RESULT_UNAVAILABLE rolledBack=${rolledBack}`);
+      return response.status(503).json({ ok: false, error: 'AUDIT_UNAVAILABLE', restored: false, rolledBack, auditRecorded: false });
+    }
+
+    // 8) 감사 이력 보존 확인: 이전 기록이 모두 남아 있고, 이번 실행의 시작·결과 두 줄이 더해졌는지
+    const auditAfter = await auditEntryIds(supabase, id);
+    const previousEntriesPreserved = Boolean(auditAfter) && auditBefore.every((x) => auditAfter.includes(x));
+    const auditHistoryPreserved = previousEntriesPreserved && auditAfter.length >= auditBefore.length + 2;
+    verified.auditHistoryPreserved = auditHistoryPreserved;
+    const audit = {
+      table: 'restore_audit', appendOnly: true, runId, recorded: ['started', resultName],
+      entriesBefore: auditBefore.length, entriesAfter: auditAfter?.length ?? null, previousEntriesPreserved,
+    };
+    const scope = { restoredNotes: 1, otherNotesChecked: othersBefore.count, otherNotesUnchanged };
+    if (!ok || !auditHistoryPreserved) {
+      console.warn(`restore: 거부 500 RESTORE_VERIFY_FAILED ok=${ok} auditHistoryPreserved=${auditHistoryPreserved}`);
+      return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', ...evidenceBody(after, backup), backupVersion, changes, verified, audit, scope, auditRecorded });
+    }
+    console.warn(`restore: 완료 restored=true changes=${changes.join('+') || 'none'} audit=${audit.entriesBefore}->${audit.entriesAfter} others=${scope.otherNotesChecked}`);
+    return response.status(200).json({ ok: true, restored: true, ...evidenceBody(after, backup), backupVersion, changes, backupReread: true, verified, audit, scope, auditRecorded });
   } catch {
     return fail(response, 500, 'RESTORE_SERVER_ERROR');
   }

@@ -101,8 +101,11 @@ test('변조된 B 메모: B가 복원하면 그 한 건의 ID·소유자·내용
   const others = snapshotOthers(env.db, env.id);
   const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
   assert.equal(r.code, 200);
-  assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true });
+  assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true, otherNotesUnchanged: true, auditHistoryPreserved: true });
   assert.equal(r.body.auditRecorded, true);
+  assert.deepEqual(r.body.audit.recorded, ['started', 'restored'], '응답에 이번 실행의 감사 기록');
+  assert.deepEqual([r.body.audit.entriesBefore, r.body.audit.entriesAfter, r.body.audit.previousEntriesPreserved, r.body.audit.appendOnly], [0, 2, true, true]);
+  assert.deepEqual(r.body.scope, { restoredNotes: 1, otherNotesChecked: 0, otherNotesUnchanged: true });
   assert.equal(r.body.backupReread, true);
   // 응답만으로 ID·소유자·해시 대조(심판은 다시 조회하지 않음)
   const bk = env.db.notes_backup.find((b) => b.public_id === env.id);
@@ -215,14 +218,47 @@ test('감사 시작 기록을 쓸 수 없으면 복원하지 않는다', { skip:
   assert.equal(JSON.stringify(env.db.notes), before);
 });
 
-test('결과 감사 기록이 실패하면 응답에 auditRecorded:false로 알린다(시작 기록은 남음)', { skip: !ready && 'npm install 필요' }, async () => {
+test('결과 감사 기록을 못 남기면(다시 시도해도 실패) 변조 상태로 되돌리고 503으로 멈춘다 — 감사 기록 없는 복원은 남지 않음', { skip: !ready && 'npm install 필요' }, async () => {
   const env = await scenario();
   await env.notes('PUT', `/api/notes/${env.id}`, env.tb, { title: '변조', body: '변조된 내용' });
-  env.db.failAuditFrom = env.db.auditCalls + 2; // 시작 기록은 성공, 결과 기록부터 실패
+  const tampered = env.db.notes.find((n) => n.public_id === env.id);
+  const before = { title: tampered.title, content: tampered.content };
+  const others = snapshotOthers(env.db, env.id);
+  env.db.failAuditFrom = env.db.auditCalls + 2; // 시작 기록은 성공, 결과 기록(재시도 포함)부터 실패
   const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
-  assert.equal(r.code, 200);
-  assert.equal(r.body.auditRecorded, false);
-  assert.deepEqual(env.db.restore_audit.map((a) => a.result), ['started']);
+  assert.equal(r.code, 503);
+  assert.deepEqual([r.body.error, r.body.restored, r.body.rolledBack, r.body.auditRecorded], ['AUDIT_UNAVAILABLE', false, true, false]);
+  const row = env.db.notes.find((n) => n.public_id === env.id);
+  assert.deepEqual({ title: row.title, content: row.content }, before, '복구 전(변조) 상태로 되돌림');
+  assert.equal(snapshotOthers(env.db, env.id), others, '다른 메모 보존');
+  assert.deepEqual(env.db.restore_audit.map((a) => a.result), ['started'], '앞선 감사 기록은 그대로');
+});
+
+test('삭제된 메모 복구 중 결과 감사 기록을 못 남기면 다시 넣은 한 건을 빼고 503으로 멈춘다', { skip: !ready && 'npm install 필요' }, async () => {
+  const env = await scenario();
+  await env.notes('DELETE', `/api/notes/${env.id}`, env.tb);
+  const before = JSON.stringify(env.db.notes);
+  env.db.failAuditFrom = env.db.auditCalls + 2;
+  const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
+  assert.equal(r.code, 503);
+  assert.equal(r.body.rolledBack, true);
+  assert.equal(JSON.stringify(env.db.notes), before, '복구 전(삭제) 상태 그대로');
+});
+
+test('B의 다른 메모와 앞선 감사 기록은 보존되고, 응답에 그 증거가 담긴다', { skip: !ready && 'npm install 필요' }, async () => {
+  const env = await scenario();
+  await env.notes('POST', '/api/notes', env.tb, { title: 'B의 다른 가상 메모', body: '다른 내용' });
+  await env.notes('PUT', `/api/notes/${env.id}`, env.tb, { title: '변조', body: '변조된 내용' });
+  const r1 = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
+  assert.equal(r1.code, 200);
+  assert.deepEqual(r1.body.scope, { restoredNotes: 1, otherNotesChecked: 1, otherNotesUnchanged: true });
+  const firstAudit = env.db.restore_audit.map((a) => ({ ...a }));
+  await env.notes('PUT', `/api/notes/${env.id}`, env.tb, { title: '다시 변조', body: '다시 변조된 내용' });
+  const r2 = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
+  assert.equal(r2.code, 200);
+  assert.deepEqual([r2.body.audit.entriesBefore, r2.body.audit.entriesAfter, r2.body.audit.previousEntriesPreserved], [2, 4, true]);
+  assert.deepEqual(env.db.restore_audit.slice(0, firstAudit.length), firstAudit, '앞선 감사 기록이 한 글자도 바뀌지 않음');
+  assert.equal(r2.body.verified.auditHistoryPreserved, true);
 });
 
 test('두 번 복원해도 한 건만 남고, 앞선 감사 기록은 보존된다', { skip: !ready && 'npm install 필요' }, async () => {
@@ -249,5 +285,5 @@ test('심판 시험 계정 A·B(같은 sub): 메모 API와 같은 소유자 키�
   assert.equal(r.code, 200, '메모 API가 저장한 소유자 키와 복원 API의 소유자 키가 같음');
   const bk = env.db.notes_backup.find((b) => b.public_id === made.body.id);
   assert.deepEqual([r.body.id, r.body.ownerId, r.body.contentSha256], [bk.public_id, bk.owner_id, bk.content_sha256], '심판 B: 응답만으로 ID·소유자·해시 일치');
-  assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true });
+  assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true, otherNotesUnchanged: true, auditHistoryPreserved: true });
 });
