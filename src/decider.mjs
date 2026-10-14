@@ -6,7 +6,7 @@
 // 6단계 device_registered: request.deviceRegistered가 true가 아니면 가장 먼저 device_not_registered로 거부합니다.
 // 8단계 resource_zones: 엔진이 확인한 deviceId·subjectId·method·path·route가 맞는 구역 경로만 들입니다.
 //   프로젝트의 모든 자원을 구역으로 나눕니다: 내 메모(owner_notes), 반 공지(class_notices), 강사 자료(instructor_materials).
-//   내 메모는 다섯 경로, 반 공지·강사 자료는 읽기(GET)만 허용하고 쓰기는 구역별 거부 사유로, 알 수 없는 경로는 거부합니다.
+//   내 메모는 한 건 읽기·수정·삭제와 추가(전체 목록 GET /notes는 거부), 반 공지·강사 자료는 읽기(GET)만 허용하고 쓰기는 구역별 거부 사유로, 알 수 없는 경로는 거부합니다.
 // 7단계 step_up_required: 허용될 요청이라도 복합 이상 접속이면, 방금 다시 확인한 경우가 아닌 한 추가 확인을 요청합니다.
 // 그 밖의 요청은 시작 틀의 starter.deny 규칙대로 거부합니다.
 export const RULE_IDS = Object.freeze([
@@ -117,9 +117,9 @@ const DEVICE_ID = /^[0-9a-f]{16}$/u;
 // 빈 쿼리의 SHA-256 지문. 쿼리 길이가 0이면 지문도 이 값이어야 합니다(쿼리로 기능·구역을 고르지 못하게).
 const EMPTY_QUERY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const ZONE_ROUTES = Object.freeze({
-  // 내 메모 구역: 읽기·수정(추가·고침·삭제). aleph.config.json의 allowedRoutes와 같은 다섯 경로입니다.
-  // 남의 메모인지는 판정기가 알 수 없으므로, 자료 API(api/notes.js)가 저장된 owner_id로 다시 막습니다.
-  'GET /notes': 'owner_notes',
+  // 내 메모 구역: 메모 한 건 읽기·수정·삭제와 추가만 엽니다.
+  // 메모 한 건의 주인 비교는 자료 API(api/notes.js)가 저장된 owner_id로 합니다.
+  // GET /notes(메모 전체 목록)는 여러 사람의 자료를 한꺼번에 여는 경로라 열지 않고 아래에서 거부합니다.
   'POST /notes': 'owner_notes',
   'GET /notes/:id': 'owner_notes',
   'PUT /notes/:id': 'owner_notes',
@@ -162,6 +162,8 @@ function zoneFor(request) {
   if (!shape || shape !== route || queryLength !== 0) {
     return { deny: ['route_not_allowed', 'resource_zones'] };
   }
+  // 메모 전체 목록은 여러 사람의 자료를 한꺼번에 여는 경로이므로 거부합니다.
+  if (shape === 'GET /notes') return { deny: ['route_not_allowed', 'owner_notes_zone'] };
   const collection = shape.split(' ')[1].split('/')[1];
   const readOnly = READ_ONLY_ZONES[collection];
   if (readOnly && WRITE_METHODS.has(method)) {
