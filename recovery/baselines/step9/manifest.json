@@ -1,0 +1,58 @@
+{
+  "schema": "aleph.policy-baseline.v1",
+  "baselineId": "step9-195d38a",
+  "sourceCommit": "195d38a4fde5872fe84766328612896dbae14dcb",
+  "description": "9단계 저장점(침해 전) 커밋에서 git show로 꺼낸 안전 정책 사본입니다. 내용은 줄바꿈을 LF로 맞춰 SHA-256을 계산합니다.",
+  "scope": [
+    "판정기 규칙·구역 표",
+    "자원 구역",
+    "로그인 검증",
+    "메모 API 접근 검사",
+    "DB RLS·권한 회수 SQL",
+    "aleph.config.json 정책 칸"
+  ],
+  "files": [
+    {
+      "path": "src/decider.mjs",
+      "baselinePath": "policy/src/decider.mjs",
+      "sha256": "5aca8644e5dff66c68fb8f3fd786b485354a91c626afaea481b0ed62804218d2"
+    },
+    {
+      "path": "src/resources.mjs",
+      "baselinePath": "policy/src/resources.mjs",
+      "sha256": "18ac3767897e139478048a62f77ee1771409bc44c1d90459d65f64098b57401a"
+    },
+    {
+      "path": "src/verify-login.mjs",
+      "baselinePath": "policy/src/verify-login.mjs",
+      "sha256": "c8fa6842c7904f9430e002bd92207d4aef9d54739a712f716153a2cb96e7389b"
+    },
+    {
+      "path": "api/notes.js",
+      "baselinePath": "policy/api/notes.js",
+      "sha256": "fffb9734e46928e8316847635e31a0715d71760e0cfb20ecf8ec52fadea3016d"
+    },
+    {
+      "path": "supabase/notes-step4-rls.sql",
+      "baselinePath": "policy/supabase/notes-step4-rls.sql",
+      "sha256": "b3c0b21526837e66b044e3224aec95c35fc5d23d332d1e353927a4aa2eb380e2"
+    },
+    {
+      "path": "supabase/notes-step5-revoke.sql",
+      "baselinePath": "policy/supabase/notes-step5-revoke.sql",
+      "sha256": "7f8d9659f5ea2fb60abdbbcf5ea86b52af243cdf474c655b42fc4b7746ae8c8f"
+    }
+  ],
+  "configFields": {
+    "path": "aleph.config.json",
+    "fields": [
+      "allowedRoutes",
+      "identityProvider",
+      "judgeIssuer",
+      "originalApiUrl",
+      "restoreRoute"
+    ],
+    "baselinePath": "policy/config/policy-fields.json",
+    "sha256": "03e7916c6e1c81a035235ca2f96591a01c310d561b20bf874c81e3a74285ab82"
+  }
+}

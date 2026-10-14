@@ -1,0 +1,20 @@
+{
+  "allowedRoutes": [
+    "GET /api/notes",
+    "POST /api/notes",
+    "GET /api/notes/:id",
+    "PUT /api/notes/:id",
+    "DELETE /api/notes/:id",
+    "POST /api/auth/login",
+    "POST /api/auth/refresh",
+    "POST /api/auth/logout"
+  ],
+  "identityProvider": {
+    "issuer": "https://yakpkxozjfwnflpizavj.supabase.co/auth/v1",
+    "audience": "authenticated",
+    "jwksUrl": "https://yakpkxozjfwnflpizavj.supabase.co/auth/v1/.well-known/jwks.json"
+  },
+  "judgeIssuer": "https://aleph-judge-production.up.railway.app/defense/judge",
+  "originalApiUrl": "https://yakpkxozjfwnflpizavj.supabase.co/rest/v1/notes",
+  "restoreRoute": null
+}
