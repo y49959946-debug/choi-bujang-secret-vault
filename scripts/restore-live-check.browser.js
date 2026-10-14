@@ -1,5 +1,6 @@
 // BYTE BACK 10단계 · 배포에서 시험 계정 B로 복구와 복구 직후 재시험 (브라우저 개발자 도구 콘솔에 붙여 넣기)
-// - https://choi-bujang-secret-vault-sandy.vercel.app 에서 시험 계정 B로 로그인한 탭에서 실행합니다.
+// - https://choi-bujang-secret-vault-sandy.vercel.app 탭에서 실행합니다(시험 계정 B의 이메일·비밀번호를 물음).
+// - 11단계부터는 보호 요청에 기기 서명이 필요해, 이 스크립트의 메모·복구 요청은 403 DEVICE_PROOF_REQUIRED가 나오는 것이 정상입니다.
 // - 토큰·메모 본문은 출력하지 않습니다. 결과표와 해시 앞 12자리만 출력합니다.
 // - 가상 메모 한 건을 만들어 변조→복구, 삭제→복구한 뒤, 복구 직후 금지 요청과 정상 요청을 다시 보냅니다.
 (async () => {
@@ -7,9 +8,18 @@
   const add = (group, name, expected, actual, ok) => rows.push({ 묶음: group, 시험: name, 기대: expected, 실제: actual, 결과: ok ? '통과' : '실패' });
   const sha = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(t ?? ''))))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
-  const s = JSON.parse(localStorage.getItem('byteback-session') ?? 'null');
-  if (!s?.access_token) { console.error('B 계정으로 로그인한 뒤 다시 실행하세요.'); return; }
-  const auth = { Authorization: `Bearer ${s.access_token}` };
+  // 로그인 토큰은 브라우저 저장소에서 읽지 않습니다. 시험 계정으로 직접 로그인해 이 탭 메모리(window 변수)에만 둡니다.
+  const LOGIN = window.__bytebackCheckLogin ??= {};
+  if (!LOGIN.token) {
+    const email = prompt('시험 계정 이메일');
+    const password = email ? prompt('시험 계정 비밀번호 (이 탭 메모리에서만 쓰고 저장·출력하지 않음)') : null;
+    if (!email || !password) { console.error('로그인 정보를 넣지 않아 멈춥니다.'); return; }
+    const r = await fetch('/api/auth/login', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d?.access_token) { console.error('로그인하지 못했습니다.'); return; }
+    LOGIN.token = d.access_token;
+  }
+  const auth = { Authorization: `Bearer ${LOGIN.token}` };
   const call = async (method, path, { body, headers = auth } = {}) => {
     const r = await fetch(path, { method, headers: { ...headers, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
     let json = null; try { json = await r.json(); } catch { /* 204 등 */ }

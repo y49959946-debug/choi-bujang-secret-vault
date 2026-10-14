@@ -243,7 +243,8 @@ test('화면: 승인 전에는 자료를 요청·표시하지 않고, 기기 키
   assert.match(html, /if \(!device\.proof\) \{\s*showMessage\('서버가 이 기기를 승인한 뒤에만 자료를 보여 줍니다/u, 'loadNotes: 승인 전에는 자료 요청 없음');
   assert.match(html, /if \(!device\.proof\) \{ closeVault\(\); throw/u, 'api(): 승인 전에는 보호 요청을 보내지 않음');
   assert.match(html, /generateKey\(\{ name: 'ECDSA', namedCurve: 'P-256' \}, false/u, '임시 비밀키는 내보낼 수 없게 만듦');
-  assert.deepEqual([...html.matchAll(/localStorage\.setItem\(([^,]+),/gu)].map((m) => m[1].trim()), ['SESSION_KEY'], '새로 저장하는 값 없음');
+  assert.equal((html.match(/localStorage\.setItem|localStorage\.getItem/gu) ?? []).length, 0, '로그인 토큰·기기 키를 브라우저 저장소에 쓰거나 읽지 않음');
+  assert.match(html, /function saveSession\(next\) \{ session = next; \}/u, '로그인 정보는 메모리 변수에만');
   assert.doesNotMatch(html, /\b(sessionStorage|indexedDB)\s*\./u, "세션 저장소·브라우저 DB 사용 없음");
   assert.match(html, /done\.data\?\.approved === true && done\.data\.sessionId/u, '서버가 approved:true와 세션을 줄 때만 열림');
 });

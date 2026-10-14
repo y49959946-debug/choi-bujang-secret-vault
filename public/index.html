@@ -101,8 +101,8 @@
   <script type="module">
     // 5단계: 화면 코드에는 Supabase 주소·키·SDK를 두지 않습니다.
     // 로그인·토큰 갱신·로그아웃은 /api/auth/*, 메모는 /api/notes* 서버 함수만 부릅니다.
-    // 서버가 돌려준 로그인 정보(토큰)는 이 브라우저에만 보관하고 화면·콘솔에 출력하지 않습니다.
-    const SESSION_KEY = 'byteback-session';
+    // 서버가 돌려준 로그인 정보(토큰)는 이 화면의 메모리에만 두고, 브라우저 저장소·화면·콘솔에 남기지 않습니다.
+    const LEGACY_SESSION_KEY = 'byteback-session'; // 10단계까지 쓰던 저장소 칸 이름(남아 있으면 지우기만 함)
 
     const box = document.querySelector('#auth');
     const statusText = document.querySelector('#auth-status');
@@ -119,19 +119,12 @@
     function showError(message) { errorText.textContent = message; }
 
     // ----- 로그인 정보 보관 -----
+    // 11단계: 로그인 토큰도 기기 키처럼 이 화면의 메모리(변수)에만 둡니다. 브라우저 저장소에는 넣지 않으므로
+    // 새로고침하거나 앱을 다시 열면 다시 로그인합니다. 예전 버전이 저장소에 남긴 로그인 정보는 열 때 지웁니다.
     let session = null;
-    function readStoredSession() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
-        return saved?.access_token && saved?.refresh_token ? saved : null;
-      } catch { return null; }
-    }
-    function saveSession(next) {
-      session = next;
-      try {
-        if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-        else localStorage.removeItem(SESSION_KEY);
-      } catch { /* 저장소를 못 써도 이번 화면에서는 동작합니다. */ }
+    function saveSession(next) { session = next; }
+    function purgeLegacyStoredLogin() {
+      try { window.localStorage.removeItem(LEGACY_SESSION_KEY); } catch { /* 저장소를 못 써도 지울 것이 없습니다. */ }
     }
 
     async function postAuth(action, body, token) {
@@ -371,7 +364,8 @@
     const sha256Hex = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
     const newKeyPair = () => crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']); // 비밀키는 내보낼 수 없음
     async function publicOf(pair) { const j = await crypto.subtle.exportKey('jwk', pair.publicKey); return { kty: j.kty, crv: j.crv, x: j.x, y: j.y }; }
-    const signText = async (privateKey, text) => b64u(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(text)));
+    // signer: 내보낼 수 없는 서명 키 손잡이(CryptoKey). 키 값 자체는 브라우저가 쥐고 있어 코드·화면·저장소에 나오지 않습니다.
+    const signText = async (signer, text) => b64u(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signer, new TextEncoder().encode(text)));
 
     // 서명 문자열(서버 src/device-proof.mjs와 같은 규칙)
     function normalizeTarget(pathname, search) {
@@ -387,7 +381,7 @@
       const timestamp = String(Date.now());
       const nonce = b64u(crypto.getRandomValues(new Uint8Array(18)));
       const canonical = ['aleph-device-v1', method.toUpperCase(), target.path, target.search, await sha256Hex(bodyText), timestamp, nonce, device.proof.sessionId].join('\n');
-      return { 'X-Device-Session': device.proof.sessionId, 'X-Device-Timestamp': timestamp, 'X-Device-Nonce': nonce, 'X-Device-Signature': await signText(device.proof.privateKey, canonical) };
+      return { 'X-Device-Session': device.proof.sessionId, 'X-Device-Timestamp': timestamp, 'X-Device-Nonce': nonce, 'X-Device-Signature': await signText(device.proof.signer, canonical) };
     }
 
     async function postDevice(action, body) {
@@ -430,9 +424,9 @@
       return postDevice(purpose === 'register' ? 'key-register' : 'key-session', { challengeId: start.data.challengeId, deviceKey: key.pub, signature,
         ...(purpose === 'register' ? { label: '메모리 키 · ' + (navigator.userAgentData?.platform || navigator.platform || '내 기기').slice(0, 20) } : {}) });
     }
-    function showSessionResult(done, privateKey) {
+    function showSessionResult(done, signer) {
       if (done.status === 200 && done.data?.approved === true && done.data.sessionId) {
-        device.proof = { sessionId: done.data.sessionId, privateKey, expiresAt: done.data.expiresAt };
+        device.proof = { sessionId: done.data.sessionId, signer, expiresAt: done.data.expiresAt };
         setDeviceState('approved', '승인됨 — 서버가 이 기기를 등록 기기로 확인했습니다');
         loadNotes(session);
       } else if (done.status === 200 && done.data?.status === 'pending') {
@@ -505,8 +499,7 @@
     })();
 
     // 처음 열 때: 보관된 로그인 정보가 있으면 이어서 씁니다.
-    saveSession(readStoredSession());
-    if (session) await validSession();
+    purgeLegacyStoredLogin();
     render();
   </script>
 </body>

@@ -32,8 +32,8 @@ test('화면: manifest를 연결하고, 기기 승인은 서버 결과 전까지
   assert.match(html, /설치한 앱 화면으로 열림\(기기 확인은 아님\)/u);
   assert.doesNotMatch(html, /(설치|install)[^<\n]{0,20}(승인됨|확인 완료|verified)/iu, '설치를 승인·확인으로 쓰지 않음');
   // 기기 키·승인 정보를 브라우저 저장소에 넣지 않음(기존 로그인 보관 키 외에 새 저장 없음)
-  const sets = [...html.matchAll(/localStorage\.setItem\(([^,]+),/gu)].map((m) => m[1].trim());
-  assert.deepEqual(sets, ['SESSION_KEY']);
+  assert.equal((html.match(/localStorage\.setItem|localStorage\.getItem/gu) ?? []).length, 0, '로그인 토큰·기기 키를 브라우저 저장소에 쓰거나 읽지 않음');
+  assert.match(html, /function saveSession\(next\) \{ session = next; \}/u, '로그인 정보는 메모리 변수에만');
   assert.doesNotMatch(html, /\b(sessionStorage|indexedDB)\s*\./u, "세션 저장소·브라우저 DB 사용 없음");
 });
 

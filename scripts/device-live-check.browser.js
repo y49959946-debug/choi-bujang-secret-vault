@@ -1,5 +1,5 @@
 // BYTE BACK 11단계 · 배포에서 기기 승인·요청 서명 경우의 수 확인 (브라우저 개발자 도구 콘솔에 붙여 넣기)
-// - 배포 주소에 로그인한 탭에서 실행합니다. 같은 탭에서 두 번 실행합니다.
+// - 배포 주소 탭에서 실행합니다(처음 실행 때 시험 계정 이메일·비밀번호를 물음). 같은 탭에서 두 번 실행합니다.
 //   1차(승인 전): 이 시험용 기기 키를 메모리에 만들어 '승인 대기'로 등록하고, 승인 전 거부를 확인한 뒤 기기 번호 앞자리를 알려 줍니다.
 //   → Supabase SQL Editor에서 그 기기를 승인(supabase/notes-step11-devices.sql ④)
 //   2차(승인 뒤): 승인 기기의 정상 요청과 괴물 경우의 수(서명 없음·서명 뒤 경로/본문 변경·재전송·시각 초과)를 확인합니다.
@@ -10,9 +10,18 @@
   const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
   const sha = async (t) => hex(await crypto.subtle.digest('SHA-256', enc.encode(t)));
-  const s = JSON.parse(localStorage.getItem('byteback-session') ?? 'null');
-  if (!s?.access_token) { console.error('배포 주소에 로그인한 뒤 다시 실행하세요.'); return; }
-  const AUTH = { Authorization: `Bearer ${s.access_token}` };
+  // 로그인 토큰은 브라우저 저장소에서 읽지 않습니다. 시험 계정으로 직접 로그인해 이 탭 메모리(window 변수)에만 둡니다.
+  const LOGIN = window.__bytebackCheckLogin ??= {};
+  if (!LOGIN.token) {
+    const email = prompt('시험 계정 이메일');
+    const password = email ? prompt('시험 계정 비밀번호 (이 탭 메모리에서만 쓰고 저장·출력하지 않음)') : null;
+    if (!email || !password) { console.error('로그인 정보를 넣지 않아 멈춥니다.'); return; }
+    const r = await fetch('/api/auth/login', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d?.access_token) { console.error('로그인하지 못했습니다.'); return; }
+    LOGIN.token = d.access_token;
+  }
+  const AUTH = { Authorization: `Bearer ${LOGIN.token}` };
   const rows = [];
   const add = (group, name, expected, actual, ok) => rows.push({ 묶음: group, 시험: name, 기대: expected, 실제: String(actual), 결과: ok ? '통과' : '실패' });
   const call = async (method, path, { headers = {}, body } = {}) => {
