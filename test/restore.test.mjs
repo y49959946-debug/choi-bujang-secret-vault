@@ -112,6 +112,8 @@ test('변조된 B 메모: B가 복원하면 그 한 건의 ID·소유자·내용
   assert.equal(r.body.titleSha256, bk.title_sha256);
   assert.deepEqual(r.body.restoredNote, { id: bk.public_id, ownerId: bk.owner_id, titleSha256: bk.title_sha256, contentSha256: bk.content_sha256 });
   assert.equal(r.body.backup.ownerId, bk.owner_id);
+  assert.deepEqual([r.body.owner, r.body.owner_id], [bk.owner_id, bk.owner_id], '다른 이름도 같은 소유자');
+  assert.deepEqual([r.body.contentHash, r.body.content_sha256, r.body.title_sha256], [bk.content_sha256, bk.content_sha256, bk.title_sha256], '다른 이름도 같은 해시');
   assert.deepEqual(r.body.changes, ['title', 'content']);
   assert.match(String(r.body.backupVersion?.capturedAt), /^\d{4}-/u);
   const row = env.db.notes.find((n) => n.public_id === env.id);

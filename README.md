@@ -157,7 +157,7 @@
 | 서비스 | `api/restore.js` (Vercel 서버 함수) |
 | 경로 | `POST /api/restore` (`aleph.config.json`의 `restoreRoute`, `allowedRoutes`에 등록) |
 | 요청 | `Authorization: Bearer <로그인 토큰>`, 본문 `{ "id": "<메모 UUID>" }` 하나만(다른 칸·쿼리는 400) |
-| 응답 | `{ ok, restored, id, ownerId, titleSha256, contentSha256, restoredNote, backup, backupVersion, changes, backupReread, verified: { id, owner, contentHash }, auditRecorded }`. 맨 위 `id`·`ownerId`·해시는 복구 뒤 DB에서 다시 읽은 행의 값이고, `backup`은 사본의 값입니다. 응답만으로 둘을 대조할 수 있습니다 — 메모 본문은 돌려주지 않음. 결과 감사 기록을 못 남기면 `auditRecorded: false` |
+| 응답 | `{ ok, restored, id, ownerId, titleSha256, contentSha256, restoredNote, backup, backupVersion, changes, backupReread, verified: { id, owner, contentHash }, auditRecorded }`. 같은 값을 `owner`·`owner_id`·`contentHash`·`content_sha256`·`title_sha256` 이름으로도 넣습니다. 맨 위 `id`·`ownerId`·해시는 복구 뒤 DB에서 다시 읽은 행의 값이고, `backup`은 사본의 값입니다. 응답만으로 둘을 대조할 수 있습니다 — 메모 본문은 돌려주지 않음. 결과 감사 기록을 못 남기면 `auditRecorded: false` |
 | 비공개 사본 | `public.notes_backup` — 메모가 처음 만들어질 때 DB 트리거가 제목·내용과 SHA-256을 한 번만 저장. 이후 수정·삭제는 사본에 반영되지 않음. anon·authenticated 권한 없음 |
 | 감사 기록 | `public.restore_audit` — 시작·결과·해시만 덧붙임(DB 트리거가 수정·삭제 금지). 메모 본문·토큰 없음 |
 

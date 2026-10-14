@@ -31,8 +31,13 @@ const backupEvidence = (b) => ({ id: b.public_id, ownerId: b.owner_id, titleSha2
 // 복구 결과 응답: 맨 위 id·ownerId·contentSha256은 "복구 뒤 DB에서 다시 읽은 행"의 값이고, backup은 사본의 값입니다.
 const evidenceBody = (row, backup) => {
   const note = noteEvidence(row);
-  return { id: note?.id ?? backup.public_id, ownerId: note?.ownerId ?? null, titleSha256: note?.titleSha256 ?? null,
-    contentSha256: note?.contentSha256 ?? null, restoredNote: note, backup: backupEvidence(backup) };
+  const ownerId = note?.ownerId ?? null;
+  const contentSha256 = note?.contentSha256 ?? null;
+  const titleSha256 = note?.titleSha256 ?? null;
+  // 같은 값을 흔히 쓰는 다른 이름으로도 넣습니다(owner·owner_id·contentHash·content_sha256·title_sha256). 새 정보는 없습니다.
+  return { id: note?.id ?? backup.public_id, ownerId, owner: ownerId, owner_id: ownerId,
+    titleSha256, title_sha256: titleSha256, contentSha256, contentHash: contentSha256, content_sha256: contentSha256,
+    restoredNote: note, backup: backupEvidence(backup) };
 };
 const BACKUP_COLUMNS = 'public_id, owner_id, title, content, title_sha256, content_sha256, created_at, captured_at';
 
