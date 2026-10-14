@@ -26,8 +26,10 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
   // ── 0. 사전 백업(정책 사본)을 다시 읽어 검증 ─────────────────────────
   const G0 = '0 사전 백업 검증';
   const baseline = verifyBaseline(root);
-  check(G0, '정책 사본을 다시 읽어 형식·지문·기준 커밋 내용 대조', baseline.ok,
-    baseline.ok ? (baseline.provenance === 'git_commit_verified' ? '지문 + 기준 커밋 대조' : '지문만(Git 기록 없음)') : baseline.reason);
+  // 지문과 기준 커밋 대조가 모두 돼야 통과입니다. Git 기록이 없어 지문만 확인했으면 '부분 확인'입니다.
+  add(G0, '정책 사본을 다시 읽어 형식·지문·기준 커밋 내용 대조',
+    !baseline.ok ? '실패' : baseline.provenance === 'git_commit_verified' ? '통과' : '부분 확인',
+    !baseline.ok ? baseline.reason : baseline.provenance === 'git_commit_verified' ? '지문 + 기준 커밋 대조' : '지문만 확인, Git 기록에 기준 커밋 없음');
 
   // ── 1. 정책이 돌아왔는가: 사본과 다른 곳이 복구 경로 등록뿐인지 ─────
   const G1 = '1 정책 복귀';
@@ -108,11 +110,17 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
       const forged = await env.judgeToken(sub, run, 'b', { key: env.strangerKey });
       const expired = await env.judgeToken(sub, run, 'b', { exp: env.now - 60, iat: env.now - 700 });
       const studentForged = await env.studentToken(randomUUID(), { key: env.strangerKey });
+      const wrongIssuer = await env.judgeToken(sub, run, 'b', { iss: 'https://attacker.example.com/defense/judge' });
+      const wrongAudience = await env.judgeToken(sub, run, 'b', { aud: 'other-app.vercel.app' });
+      const studentWrongAud = await env.studentToken(randomUUID(), { aud: 'anon' });
       const forbidden = [
         ['3단계: 토큰 없이 메모 한 건 조회 → 401', () => env.notes('GET', `/api/notes/${b1}`), 401],
         ['3단계: 토큰 없이 메모 목록 → 401', () => env.notes('GET', '/api/notes'), 401],
         ['3단계: 서명 위조 토큰(심판 형식) → 401', () => env.notes('GET', `/api/notes/${b1}`, forged), 401],
         ['3단계: 서명 위조 토큰(학생 형식) → 401', () => env.notes('GET', `/api/notes/${b1}`, studentForged), 401],
+        ['3단계: 다른 발급자 토큰 → 401', () => env.notes('GET', `/api/notes/${b1}`, wrongIssuer), 401],
+        ['3단계: 다른 앱 대상(aud) 심판 토큰 → 401', () => env.notes('GET', `/api/notes/${b1}`, wrongAudience), 401],
+        ['3단계: 대상(aud)이 다른 학생 토큰 → 401', () => env.notes('GET', `/api/notes/${b1}`, studentWrongAud), 401],
         ['3단계: 만료 토큰 → 401', () => env.notes('GET', `/api/notes/${b1}`, expired), 401],
         ['4단계: A가 복구된 B 메모 조회 → 403', () => env.notes('GET', `/api/notes/${b1}`, ta), 403],
         ['4단계: A가 복구된 B 메모 수정 → 403', () => env.notes('PUT', `/api/notes/${b1}`, ta, { title: 'x', body: 'y' }), 403],
@@ -150,6 +158,15 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
       check(G4, 'A 메모 추가 → 201', r.code === 201 && created, `HTTP ${r.code}`);
       r = await env.notes('DELETE', `/api/notes/${created}`, ta);
       check(G4, 'A 메모 삭제 → 204', r.code === 204, `HTTP ${r.code}`);
+
+      // 사본 변조 시 거부(검증 실패 경로): 별도 메모로 시험해 위 결과에 섞이지 않게 합니다.
+      const b3 = (await env.notes('POST', '/api/notes', tb, { title: 'B 가상 메모 3', body: 'B 침해 전 가상 내용 3' })).body?.id;
+      await env.notes('PUT', `/api/notes/${b3}`, tb, { title: '변조', body: '변조된 가상 내용' });
+      backup(b3).content = '사본 변조';
+      const beforeTamper = JSON.stringify(env.db.notes);
+      r = await env.restore('POST', '/api/restore', tb, { id: b3 });
+      check(G2, '사본이 변조돼 해시가 틀리면 409, 메모를 한 건도 바꾸지 않음', r.code === 409
+        && r.body?.error === 'BACKUP_INTEGRITY_FAILED' && JSON.stringify(env.db.notes) === beforeTamper, `HTTP ${r.code}`);
     } catch (error) {
       add(G2, `실행 오류: ${error?.message ?? 'unknown'}`, '실패');
     } finally {
@@ -165,11 +182,18 @@ export async function runRecoveryRecheck(root, { live = false } = {}) {
     && Array.isArray(out.ruleIds) && out.ruleIds.length > 0 && out.ruleIds.every((id) => RULE_IDS.includes(id));
   const deciderCases = [
     [G3, '6단계: 미등록 기기 → deny device_not_registered', req({ deviceRegistered: false }), 'deny', 'device_not_registered'],
+    [G3, '6단계: 기기 등록 칸 없음 → deny device_not_registered', (({ deviceRegistered, ...rest }) => ({ ...rest, requestId: randomUUID() }))(normal), 'deny', 'device_not_registered'],
+    [G3, '6단계: 기기 등록을 문자열 "true"로 위장 → deny', req({ deviceRegistered: 'true' }), 'deny', 'device_not_registered'],
+    [G3, '6단계: 확인된 기기 ID 없음 → deny', (({ deviceId, ...rest }) => ({ ...rest, requestId: randomUUID() }))(normal), 'deny', 'device_not_registered'],
     [G3, '7단계: 복합 이상 접속 → step_up', { ...suspicious, requestId: randomUUID() }, 'step_up', 'step_up_required'],
     [G3, '8단계: 메모 전체 목록 GET /notes → deny', req({ path: '/notes', route: 'GET /notes' }), 'deny', 'route_not_allowed'],
     [G3, '8단계: 기능 경로 GET /notes/export → deny', req({ path: '/notes/export', route: 'GET /notes/:id' }), 'deny', 'route_not_allowed'],
     [G3, '8단계: 쿼리 붙은 요청 → deny', req({ queryLength: 12 }), 'deny', 'route_not_allowed'],
     [G3, '8단계: 반 공지 수정 PUT /notices/n1 → deny', req({ method: 'PUT', path: '/notices/n1', route: 'PUT /notices/:id' }), 'deny', 'notice_write_denied'],
+    [G3, '8단계: 반 공지 PATCH /notices/n1 → deny', req({ method: 'PATCH', path: '/notices/n1', route: 'PATCH /notices/:id' }), 'deny', 'notice_write_denied'],
+    [G3, '8단계: 메모 PATCH(열지 않은 메서드) → deny', req({ method: 'PATCH', route: 'PATCH /notes/:id' }), 'deny', 'starter_not_ready'],
+    [G3, '8단계: path와 route 불일치 → deny', req({ path: '/notices/n1' }), 'deny', 'route_not_allowed'],
+    [G3, '8단계: 알 수 없는 경로 GET /admin → deny', req({ path: '/admin', route: 'GET /admin' }), 'deny', 'route_not_allowed'],
     [G3, '8단계: 강사 자료 삭제 DELETE /materials/m1 → deny', req({ method: 'DELETE', path: '/materials/m1', route: 'DELETE /materials/:id' }), 'deny', 'material_write_denied'],
     [G4, '6·8단계: 등록 기기의 메모 한 건 읽기 → allow', req({}), 'allow', 'approved'],
     [G4, '8단계: 반 공지 읽기 GET /notices → allow', req({ path: '/notices', route: 'GET /notices' }), 'allow', 'approved'],
@@ -222,7 +246,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename
     process.stdout.write(`${item.status} · ${item.name}${item.note ? ` (${item.note})` : ''}\n`);
   }
   const count = (s) => results.filter((r) => r.status === s).length;
-  process.stdout.write(`\n통과 ${count('통과')} · 실패 ${count('실패')} · 미실행 ${count('미실행')}\n`);
+  process.stdout.write(`\n통과 ${count('통과')} · 부분 확인 ${count('부분 확인')} · 실패 ${count('실패')} · 미실행 ${count('미실행')}\n`);
   process.stdout.write('가짜 DB·가상 요청으로 한 로컬 재시험입니다. 미실행 항목은 결과가 없으며 심판 판정이 아닙니다.\n');
   if (count('실패') > 0) process.exitCode = 1;
 }

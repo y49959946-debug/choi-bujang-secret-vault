@@ -26,11 +26,11 @@ export async function createFakeVault(root) {
   const jwk = { ...(await jose.exportJWK(pair.publicKey)), kid, alg: 'ES256', use: 'sig' };
   const now = Math.floor(Date.now() / 1000);
 
-  const studentToken = (sub, { key = pair.privateKey, exp = now + 600, iat = now } = {}) => new jose.SignJWT({ role: 'authenticated' })
-    .setProtectedHeader({ alg: 'ES256', kid }).setIssuer(issuer).setAudience(config.identityProvider.audience)
+  const studentToken = (sub, { key = pair.privateKey, exp = now + 600, iat = now, iss = issuer, aud = config.identityProvider.audience } = {}) => new jose.SignJWT({ role: 'authenticated' })
+    .setProtectedHeader({ alg: 'ES256', kid }).setIssuer(iss).setAudience(aud)
     .setSubject(sub).setIssuedAt(iat).setExpirationTime(exp).sign(key);
-  const judgeToken = (sub, run, who, { key = pair.privateKey, exp = now + 600, iat = now } = {}) => new jose.SignJWT({ aleph_run: run, aleph_role: 'judge', aleph_identity: who })
-    .setProtectedHeader({ alg: 'ES256', kid }).setIssuer(judgeIssuer).setAudience(new URL(config.publicAppUrl).hostname)
+  const judgeToken = (sub, run, who, { key = pair.privateKey, exp = now + 600, iat = now, iss = judgeIssuer, aud = new URL(config.publicAppUrl).hostname } = {}) => new jose.SignJWT({ aleph_run: run, aleph_role: 'judge', aleph_identity: who })
+    .setProtectedHeader({ alg: 'ES256', kid }).setIssuer(iss).setAudience(aud)
     .setSubject(sub).setIssuedAt(iat).setExpirationTime(exp).sign(key);
 
   const db = { notes: [], notes_backup: [], restore_audit: [] };

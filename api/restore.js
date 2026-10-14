@@ -138,9 +138,11 @@ export default async function handler(request, response) {
       contentHash: sha256(after?.content) === backup.content_sha256 && sha256(after?.title) === backup.title_sha256,
     };
     const ok = verified.id && verified.owner && verified.contentHash;
-    await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
-    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', id, verified });
-    return response.status(200).json({ ok: true, restored: true, id, contentSha256: backup.content_sha256, verified });
+    // 7) 결과 감사 기록. 메모는 이미 복원됐으므로 되돌리지 않고, 결과 기록이 빠졌다는 사실을 응답(auditRecorded)과 로그에 남깁니다.
+    const auditRecorded = await record(ok ? 'restored' : 'verify_failed', ok ? 'matches_backup' : 'after_mismatch', { content_sha256: ok ? backup.content_sha256 : sha256(after?.content) });
+    if (!auditRecorded) console.warn('[restore] result audit missing');
+    if (!ok) return response.status(500).json({ ok: false, error: 'RESTORE_VERIFY_FAILED', id, verified, auditRecorded });
+    return response.status(200).json({ ok: true, restored: true, id, contentSha256: backup.content_sha256, verified, auditRecorded });
   } catch {
     return fail(response, 500, 'RESTORE_SERVER_ERROR');
   }

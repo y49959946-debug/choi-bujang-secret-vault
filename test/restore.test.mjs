@@ -30,7 +30,7 @@ async function setup() {
     .setProtectedHeader({ alg: 'ES256', kid: 'k' }).setIssuer(judgeIssuer).setAudience(new URL(config.publicAppUrl).hostname)
     .setSubject(sub).setIssuedAt(now).setExpirationTime(now + 600).sign(keys.privateKey);
 
-  const db = { notes: [], notes_backup: [], restore_audit: [], failAudit: false };
+  const db = { notes: [], notes_backup: [], restore_audit: [], failAudit: false, failAuditFrom: Infinity, auditCalls: 0 };
   const insertNote = (row) => {
     if (db.notes.some((r) => r.public_id === row.public_id)) return false;
     const full = { created_at: new Date().toISOString(), ...row };
@@ -57,7 +57,7 @@ async function setup() {
     if (method === 'GET') return out(db[table].filter(match));
     if (method === 'POST') {
       const body = JSON.parse(init.body);
-      if (table === 'restore_audit') { if (db.failAudit) return Response.json({ code: '42501' }, { status: 403 }); db.restore_audit.push({ id: db.restore_audit.length + 1, ...body }); return new Response(null, { status: 201 }); }
+      if (table === 'restore_audit') { db.auditCalls += 1; if (db.failAudit || db.auditCalls >= db.failAuditFrom) return Response.json({ code: '42501' }, { status: 403 }); db.restore_audit.push({ id: db.restore_audit.length + 1, ...body }); return new Response(null, { status: 201 }); }
       if (table === 'notes_backup') return Response.json({ code: '42501' }, { status: 403 });
       return insertNote(body) ? new Response(null, { status: 201 }) : Response.json({ code: '23505' }, { status: 409 });
     }
@@ -99,6 +99,7 @@ test('변조된 B 메모: B가 복원하면 그 한 건의 ID·소유자·내용
   const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
   assert.equal(r.code, 200);
   assert.deepEqual(r.body.verified, { id: true, owner: true, contentHash: true });
+  assert.equal(r.body.auditRecorded, true);
   const row = env.db.notes.find((n) => n.public_id === env.id);
   const backup = env.db.notes_backup.find((b) => b.public_id === env.id);
   assert.equal(row.public_id, backup.public_id);
@@ -183,6 +184,16 @@ test('감사 시작 기록을 쓸 수 없으면 복원하지 않는다', { skip:
   const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
   assert.equal(r.code, 503);
   assert.equal(JSON.stringify(env.db.notes), before);
+});
+
+test('결과 감사 기록이 실패하면 응답에 auditRecorded:false로 알린다(시작 기록은 남음)', { skip: !ready && 'npm install 필요' }, async () => {
+  const env = await scenario();
+  await env.notes('PUT', `/api/notes/${env.id}`, env.tb, { title: '변조', body: '변조된 내용' });
+  env.db.failAuditFrom = env.db.auditCalls + 2; // 시작 기록은 성공, 결과 기록부터 실패
+  const r = await env.restore('POST', '/api/restore', env.tb, { id: env.id });
+  assert.equal(r.code, 200);
+  assert.equal(r.body.auditRecorded, false);
+  assert.deepEqual(env.db.restore_audit.map((a) => a.result), ['started']);
 });
 
 test('두 번 복원해도 한 건만 남고, 앞선 감사 기록은 보존된다', { skip: !ready && 'npm install 필요' }, async () => {
