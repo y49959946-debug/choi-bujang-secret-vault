@@ -254,3 +254,58 @@ test('DB: 서버 전용 키는 기기 상태·승인 시각을 고칠 권한이 
   assert.doesNotMatch(sql, /grant [^;]*update[^;(]*on table public\.device_credentials/iu, '표 전체 update 권한 없음');
   assert.match(sql, /revoke all on table public\.device_credentials, public\.device_challenges, public\.device_sessions, public\.device_request_nonces\s+from public, anon, authenticated, service_role;/u);
 });
+
+// ---- 패스키가 없는 기기: 메모리 전용 기기 키 흐름 ----
+import { keyProofMessage } from '../api/device.js';
+async function memKey() {
+  const pair = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+  const j = await webcrypto.subtle.exportKey('jwk', pair.publicKey);
+  const pub = { kty: j.kty, crv: j.crv, x: j.x, y: j.y };
+  const sign = async (text) => Buffer.from(await webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(text))).toString('base64url');
+  return { pair, pub, sign };
+}
+async function proveMem(call, key, purpose, { token = 'token-a', signWith = key, messageOverride } = {}) {
+  const start = await call('key-challenge', { deviceKey: key.pub, purpose }, token);
+  const sig = await signWith.sign(messageOverride ?? start.body.message);
+  return call(purpose === 'register' ? 'key-register' : 'key-session', { challengeId: start.body.challengeId, deviceKey: key.pub, signature: sig }, token);
+}
+
+test('메모리 키 기기: 승인 요청은 항상 pending, 승인 전에는 세션 없음, 주인이 DB에서 승인한 뒤에만 세션', async () => {
+  const { db, call } = apiSetup();
+  const key = await memKey();
+  const reg = await proveMem(call, key, 'register');
+  assert.deepEqual([reg.code, reg.body.approved, reg.body.status], [201, false, 'pending']);
+  assert.ok(db.t.device_credentials[0].credential_id.startsWith('mem:'));
+  assert.ok(!JSON.stringify(db.t.device_credentials[0]).includes('"d"'), '서버에는 공개키만');
+  const s1 = await proveMem(call, key, 'session');
+  assert.deepEqual([s1.code, s1.body.approved, s1.body.status, s1.body.sessionId], [200, false, 'pending', undefined]);
+  assert.equal(db.t.device_sessions.length, 0);
+  db.t.device_credentials[0].status = 'approved'; // ← 주인이 SQL Editor에서 승인
+  const s2 = await proveMem(call, key, 'session');
+  assert.deepEqual([s2.code, s2.body.approved], [200, true]);
+  assert.deepEqual(db.t.device_sessions[0].public_jwk, key.pub);
+  // 그 메모리 키로 서명한 요청만 앞단 통과
+  const gate = createDeviceGate({ verifyLogin, db: db.client, log: () => {} });
+  const ts = Date.now(); const nonce = 'm'.repeat(20);
+  const canonical = canonicalRequest({ method: 'GET', pathname: `/api/notes/${NOTE}`, search: '', bodySha256: sha256Hex(''), timestamp: ts, nonce, sessionId: s2.body.sessionId });
+  const headers = { authorization: 'Bearer token-a', 'x-device-session': s2.body.sessionId, 'x-device-timestamp': String(ts), 'x-device-nonce': nonce, 'x-device-signature': await key.sign(canonical) };
+  assert.equal(await code(await gate(req('GET', `/api/notes/${NOTE}`, headers))), 'PASS');
+  assert.ok(db.writes.filter((w) => w.table === 'device_credentials').every((w) => !('status' in (w.body ?? {}))), 'API는 기기 상태를 쓰지 않음');
+});
+
+test('메모리 키 기기: 키를 갖지 않은 쪽(다른 키로 서명·문제 바꾸기·다른 계정)은 등록·세션 불가', async () => {
+  const { db, call } = apiSetup();
+  const key = await memKey(); const other = await memKey();
+  assert.equal((await proveMem(call, key, 'register', { signWith: other })).code, 401, '공개키만 알고 비밀키가 없음');
+  assert.equal((await proveMem(call, key, 'register', { messageOverride: keyProofMessage('session', 'x', 'y') })).code, 401, '다른 문장에 서명');
+  assert.equal(db.t.device_credentials.length, 0);
+  await proveMem(call, key, 'register');
+  db.t.device_credentials[0].status = 'approved';
+  assert.equal((await proveMem(call, key, 'session', { signWith: other })).code, 401, '승인된 기기 공개키를 알아도 비밀키 없으면 세션 불가');
+  assert.equal((await proveMem(call, key, 'session', { token: 'token-b' })).code, 404, '다른 계정은 남의 기기로 세션 불가');
+  const start = await call('key-challenge', { deviceKey: key.pub, purpose: 'session' });
+  const sig = await key.sign(start.body.message);
+  assert.equal((await call('key-session', { challengeId: start.body.challengeId, deviceKey: key.pub, signature: sig })).code, 200);
+  assert.equal((await call('key-session', { challengeId: start.body.challengeId, deviceKey: key.pub, signature: sig })).code, 400, '같은 문제 재사용 불가');
+  assert.equal((await call('key-challenge', { deviceKey: { ...key.pub, d: 'x' }, purpose: 'register' })).code, 400, '비밀값 든 키 거부');
+});

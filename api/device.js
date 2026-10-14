@@ -4,6 +4,13 @@
 //   POST /api/device/session-options   본문 { sessionKey: 임시 서명 공개키 } → 패스키 확인 문제(그 공개키 지문이 들어감)
 //   POST /api/device/session           패스키 확인 → 서버 DB에서 그 기기가 'approved'일 때만 임시 서명 키를 기기 세션으로 등록
 //
+// 패스키(Windows Hello 등)가 없는 기기용 "메모리 전용 기기 키" 흐름:
+//   POST /api/device/key-challenge     본문 { deviceKey: 공개키, purpose: 'register'|'session' } → 일회용 문제
+//   POST /api/device/key-register      그 문제에 기기 키로 서명해 키를 가졌음을 증명 → 항상 'pending'(승인 대기)
+//   POST /api/device/key-session       같은 증명 → 서버 DB에서 그 기기 키가 'approved'일 때만 기기 세션 등록
+//   - 기기 키의 비밀키는 화면 메모리에만 있고 내보낼 수 없습니다(새로고침하면 사라져 다시 승인받아야 함).
+//   - 서버는 공개키만 저장합니다(자격 ID 'mem:<지문>'). 승인은 패스키와 똑같이 주인이 SQL Editor에서만 합니다.
+//
 // - 기기 키(패스키 비밀키)는 운영체제 인증 장치에 있고 브라우저 저장소에 없습니다. 서버는 공개키만 저장합니다.
 // - 임시 서명 키의 비밀키는 화면 메모리에만 있고, 서버는 그 공개키만 받습니다(비밀값 d가 있으면 거부).
 // - 승인은 주인이 Supabase SQL Editor에서 합니다(supabase/notes-step11-devices.sql ④). 화면 버튼은 승인 "요청"만 남깁니다.
@@ -13,11 +20,14 @@ import * as simple from '@simplewebauthn/server';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from '../src/verify-login.mjs';
 import { ownerKeyOf } from '../src/owner-key.mjs';
-import { jwkThumbprint, publicJwk, sessionChallengeBytes } from '../src/device-proof.mjs';
+import { PROOF_VERSION, jwkThumbprint, publicJwk, sessionChallengeBytes, verifyProofSignature } from '../src/device-proof.mjs';
 
 const CHALLENGE_MS = 5 * 60 * 1000;
 const SESSION_MS = 8 * 60 * 60 * 1000;
-const ACTIONS = new Set(['register-options', 'register', 'session-options', 'session']);
+const ACTIONS = new Set(['register-options', 'register', 'session-options', 'session', 'key-challenge', 'key-register', 'key-session']);
+const MEM = 'mem:';
+// 메모리 기기 키가 서명하는 문자열(목적·문제·키 지문을 묶어 다른 용도로 재사용 불가)
+export const keyProofMessage = (purpose, challenge, thumbprint) => `${PROOF_VERSION}|device-key|${purpose}|${challenge}|${thumbprint}`;
 const HOST = /^[a-z0-9.-]{1,253}(:\d{1,5})?$/iu;
 
 function readBody(request) {
@@ -76,7 +86,54 @@ export function createDeviceHandler({ env = process.env, verifyLogin = null, db 
       const { data: mine, error: mineError } = await client.from('device_credentials')
         .select('id, credential_id, public_key, counter, transports, rp_id, status').eq('owner_id', ownerKey);
       if (mineError) return fail(response, 502, 'DEVICE_DB_FAILED', action);
-      const here = (mine ?? []).filter((d) => d.rp_id === site.rpID);
+      const hereAll = (mine ?? []).filter((d) => d.rp_id === site.rpID);
+      const here = hereAll.filter((d) => !String(d.credential_id).startsWith(MEM)); // 패스키 기기
+      const memDevices = hereAll.filter((d) => String(d.credential_id).startsWith(MEM)); // 메모리 키 기기
+
+      if (action === 'key-challenge') {
+        const thumb = jwkThumbprint(body.deviceKey);
+        if (!thumb || !['register', 'session'].includes(body.purpose)) return fail(response, 400, 'DEVICE_KEY_INVALID', action);
+        const challenge = randomBytes(32).toString('base64url');
+        const { data: row, error } = await client.from('device_challenges').insert({
+          owner_id: ownerKey, purpose: body.purpose, challenge, key_thumbprint: thumb, rp_id: site.rpID,
+          expires_at: new Date(now() + CHALLENGE_MS).toISOString(),
+        }).select('id').single();
+        if (error || !row) return fail(response, 502, 'DEVICE_DB_FAILED', action);
+        return response.status(200).json({ ok: true, challengeId: row.id, challenge, message: keyProofMessage(body.purpose, challenge, thumb) });
+      }
+
+      if (action === 'key-register' || action === 'key-session') {
+        const purpose = action === 'key-register' ? 'register' : 'session';
+        const key = publicJwk(body.deviceKey);
+        const thumb = jwkThumbprint(body.deviceKey);
+        if (!key || !thumb) return fail(response, 400, 'DEVICE_KEY_INVALID', action);
+        const challenge = await takeChallenge(body.challengeId, ownerKey, purpose, site.rpID);
+        if (!challenge || challenge.key_thumbprint !== thumb) return fail(response, 400, 'CHALLENGE_INVALID', action);
+        // 기기 키를 가졌다는 증명: 서버가 낸 문제에 그 키로 서명
+        if (!(await verifyProofSignature(key, keyProofMessage(purpose, challenge.challenge, thumb), body.signature))) {
+          return fail(response, 401, 'DEVICE_KEY_NOT_VERIFIED', action);
+        }
+        const credentialId = `${MEM}${thumb}`;
+        if (purpose === 'register') {
+          const { data: row, error } = await client.from('device_credentials').insert({
+            owner_id: ownerKey, credential_id: credentialId, public_key: JSON.stringify(key), counter: 0, transports: [],
+            rp_id: site.rpID, label: cleanLabel(body.label || '메모리 키 기기'),
+            // status는 넣지 않습니다 → DB 기본값 'pending'(승인 대기)
+          }).select('id, status, created_at').single();
+          if (error || !row) return fail(response, error?.code === '23505' ? 409 : 502, error?.code === '23505' ? 'DEVICE_EXISTS' : 'DEVICE_DB_FAILED', action);
+          log(`device: 등록 pending(메모리 키) id=${String(row.id).slice(0, 8)}`);
+          return response.status(201).json({ ok: true, approved: false, status: row.status, deviceId: row.id, createdAt: row.created_at });
+        }
+        const device = memDevices.find((d) => d.credential_id === credentialId);
+        if (!device) return fail(response, 404, 'NO_DEVICE', action);
+        await client.from('device_credentials').update({ last_used_at: new Date(now()).toISOString() }).eq('id', device.id);
+        if (device.status !== 'approved') return response.status(200).json({ ok: true, approved: false, status: device.status, deviceId: device.id });
+        const sessionId = randomUUID();
+        const expiresAt = new Date(now() + SESSION_MS).toISOString();
+        const { error } = await client.from('device_sessions').insert({ id: sessionId, owner_id: ownerKey, credential_row: device.id, public_jwk: key, expires_at: expiresAt });
+        if (error) return fail(response, 502, 'DEVICE_DB_FAILED', action);
+        return response.status(200).json({ ok: true, approved: true, status: 'approved', deviceId: device.id, sessionId, expiresAt });
+      }
 
       if (action === 'register-options') {
         const options = await webauthn.generateRegistrationOptions({
