@@ -315,9 +315,10 @@
 - **규칙표를 고친 곳 하나:** 토큰 없는 `POST /api/ops`가 401이 아니라 405였습니다. 작전실 함수가 로그인보다 메서드를 먼저 보기 때문이며, 둘 다 거부라 규칙표에 "401 또는 405"로 적었습니다(복구 API도 같음).
 - **찾아서 고친 결함(`src/device-gate.mjs`):** 토큰 머리글이 있는데 앞단(미들웨어)이 확인하지 못하면, 기기 서명 확인을 건너뛰고 함수로 넘겼습니다. 앞단의 확인만 실패하고 함수의 확인은 성공하는 경우(공개키 목록 조회 일시 실패 등) **서명 없이 자료가 열렸습니다**(로컬 재현: 200). 이제 앞단에서 바로 닫습니다: 검증 안 됨 → `401 LOGIN_REQUIRED`, 확인 중 오류 → `403 DEVICE_CHECK_FAILED`. 토큰 없는 요청은 전처럼 함수가 401입니다. 수정 전 코드로 돌리면 `test:monsters` 3개 중 2개가 실패하고, 수정 뒤 3개 모두 통과합니다.
 - **보이는 결과의 변화:** 위조·만료 토큰 요청은 전과 같이 `401 LOGIN_REQUIRED`이고, 이제 함수가 아니라 앞단이 돌려줍니다. 기존 시험은 모두 그대로 통과했습니다(device 16, ops 8, restore 13, policy 30, app 5, live 9, guide 7, r5 2, recovery:recheck 67). `npm run policy:diff` 차이는 `restoreRoute` 하나 그대로입니다(보호 파일 변경 없음).
-- **미실행:** 이 수정의 배포 반영과 배포 실측표 재실행(아래 결과는 수정 전 배포 `de685c9` 기준), 같은 머리글이 두 줄로 올 때 Vercel이 미들웨어와 함수에 넘기는 방식의 배포 확인.
+- **배포 반영 확인(2026-10-15 10:51~10:55 KST):** 이 수정이 들어간 배포 `6407c25`에서 실측표를 다시 돌려 **41/41줄 통과**(정상 허용 12/12, 금지 거부 27/27)를 확인했습니다. 정상 요청은 그대로 허용됩니다. 아래 「12단계 배포 실측 요약」과 「배포 실측표」가 이 실행 결과입니다.
+- **미실행:** 같은 머리글이 두 줄로 올 때 Vercel이 미들웨어와 함수에 넘기는 방식의 배포 확인(수정 뒤에는 어느 방식이든 앞단에서 닫히는 것을 로컬에서 확인).
 
-#### 12단계 배포 실측 요약 (커밋 `de685c9` 배포, 2026-10-15 10:10~10:12 KST 서버 시각, 시험 계정 A·B)
+#### 12단계 배포 실측 요약 (커밋 `6407c25` 배포(12단계 마무리 수정 반영), 2026-10-15 10:51~10:55 KST 서버 시각, 시험 계정 A·B)
 
 | 항목 | 결과 |
 |---|---|
@@ -326,11 +327,11 @@
 | 금지 요청 거부 | **27/27 통과** |
 | 남의 메모(시험 계정 B의 실측용 메모) | 조회·수정·삭제 `403 OWNER_MISMATCH`, 복구 `404 BACKUP_NOT_FOUND` — 통과 |
 | 괴물 ① 무인증 → 남의 메모 | 토큰 없음 `401 LOGIN_REQUIRED` → 곧바로 본인 토큰·서명으로 남의 메모 `403 OWNER_MISMATCH` — 통과 |
-| 괴물 ② 미등록 → 회수된 기기 | 서명 없음 `403 DEVICE_PROOF_REQUIRED` → 회수된 시험용 기기 서명 `403 DEVICE_NOT_APPROVED`, 회수 기기는 세션도 못 받음(key-session 200 · status revoked · 세션 없음) — 통과 |
+| 괴물 ② 미등록 → 회수된 기기 | 서명 없음 `403 DEVICE_PROOF_REQUIRED` → 회수된 시험용 기기 서명 `403 DEVICE_NOT_APPROVED`, 회수 기기는 세션도 못 받음(200 · 조건 맞음) — 통과 |
 | 괴물 ③ 복구 뒤 서명 없는 변경·구역 밖 조회 | 복구 200(verified 모두 true) → 서명 없는 수정 `403 DEVICE_PROOF_REQUIRED` → 구역 밖 `/api/notices` 404(참고, 경로 없음이라 구역 규칙 증거 아님) → 복구 내용 조회 200 — 통과 |
 | 집계 제외(통과로 세지 않음) | SQL 확인 1(5단계), 참고 2(없는 경로 404), 실행 불가 3(7·9단계, **41종 목록 미제공**) |
-| 증거 | `evidence/step12-live-2026-10-15-full.json`(화면이 만든 결과와 SHA-256 일치 확인: `defc53ee…3ad3ad`). 요청 ID는 Vercel 로그에서 검색해 대조 가능(보존 기간 제한) |
-| 이전 실행 | 같은 날 09:59~10:01 KST, 시험 계정 A만(남의 메모 없음): 35/41줄 실행 · 통과 35 · 실패 0 · 미실행 6 → `evidence/step12-live-2026-10-15.json` |
+| 증거 | `evidence/step12-live-2026-10-15-fixed.json`(화면이 만든 결과와 SHA-256 일치 확인: `755f1258…685c30`). 요청 ID는 Vercel 로그에서 검색해 대조 가능(보존 기간 제한) |
+| 이전 실행 | 수정 전 배포 `de685c9`: 10:10~10:12 KST A·B 41/41 통과 → `evidence/step12-live-2026-10-15-full.json`, 09:59~10:01 KST A만 35/41(남의 메모 줄 미실행) → `evidence/step12-live-2026-10-15.json` |
 
 
 #### 제작 3 · 설치·실행·중지·복구 안내 (기준: 검사한 커밋)
@@ -510,62 +511,62 @@ returning left(id::text, 8) as id8, status;
 - **로컬 끝까지 시험:** 실제 `api/notes.js`·`api/restore.js`·`api/device.js`·`api/ops.js`·`src/device-gate.mjs`를 가짜 Supabase(메모리 표, 메모 생성 시 사본 트리거 흉내, 감사 기록 덧붙이기만)와 이 실행에서 만든 가짜 서명 키에 붙인 로컬 서버를 띄웠습니다. 헤드리스 브라우저 두 창(A·B)으로 위 1~5를 했습니다. **API 41줄 실행 · 통과 41 · 실패 0**(정상 허용 12/12, 금지 거부 27/27), 집계 제외 SQL 1·참고 2·실행 불가 3. 내려받은 파일에는 전체 ID·토큰·본문이 없었고, 화면 저장소 항목은 0개였습니다. 남의 메모 ID를 비우면 관련 11줄이 미실행으로 남는 것도 확인했습니다. 로컬 서버의 요청 ID는 `local::n`이며 배포 결과가 아닙니다.
 - **로컬 시험:** `npm run test:live` 9개(목록 무결성, 단계·괴물 포함, 집계 제외 규칙, 판정, 응답 값 추출, 집계, 모든 줄의 실행 코드, 변조·재전송이 원래 서명 재사용, 기록·파일에 토큰·본문·전체 ID 없음).
 
-#### 배포 실측표 (2026-10-15, 커밋 `de685c9` 배포, 시험 계정 A, 남의 메모 = 시험 계정 B의 실측용 메모)
+#### 배포 실측표 (2026-10-15, 커밋 `6407c25` 배포, 시험 계정 A, 남의 메모 = 시험 계정 B의 실측용 메모)
 
-- 실행: Claude 앱 내장 브라우저. 시험 계정 B로 로그인(사용자) → 기기 `0a32492e` 승인(SQL, 사용자) → 「실측용 메모 만들기」. 새 탭에서 시험 계정 A로 로그인(사용자) → 기기 `debd56ca` 승인(SQL) → B 메모 ID를 넣고 1차 → 시험용 기기 `de8cdd9a` 승인(SQL) → 2차 → 회수(SQL) → 3차.
-- 정리: A의 시험 메모는 3차에서 지웠습니다. B의 실측용 메모는 B 계정에 남아 있습니다(내용은 가상 문장). 복구 감사 기록에는 started·restored·rejected가 남습니다(덧붙이기만 하는 표).
-- 앞선 실행 중 화면 새로고침으로 키를 잃은 A 기기 `069c2094`는 같은 회수 SQL로 `revoked` 처리했습니다(사용자 확인: 2줄 반환).
+- 실행: Claude 앱 내장 브라우저. 12단계 마무리 수정(`6407c25`)이 배포된 것을 `/aleph.json`으로 확인한 뒤, 앞 실행에서 승인해 둔 A 기기 `debd56ca`로 같은 탭에서 실행했습니다. 남의 메모는 앞 실행에서 B 계정이 만든 실측용 메모(B 기기 `0a32492e`)입니다. 1차 → 시험용 기기 `ba5238b1` 승인(SQL, 사용자) → 2차 → 회수(SQL, 사용자) → 3차.
+- 수정 반영 확인: 위조 토큰 요청(`s3-forged-token`)은 전과 같이 `401 LOGIN_REQUIRED`인데, 요청 ID에 함수 단계 표시(`iad1::`)가 없습니다. 함수까지 가기 전에 앞단(미들웨어)이 닫았다는 뜻입니다. 토큰 없는 요청(`s3-no-token`, `m1-no-auth`)은 전처럼 함수가 401(`icn1::iad1::…`)입니다.
+- 정리: A의 시험 메모는 3차에서 지웠습니다. B의 실측용 메모는 B 계정에 남아 있습니다(내용은 가상 문장). 복구 감사 기록에는 started·restored·rejected가 남습니다(덧붙이기만 하는 표). 앞선 실행 중 키를 잃은 A 기기 `069c2094`는 회수했습니다.
 - 표의 서버 시각과 화면 시각(JSON의 clientTime)은 약 1분 차이가 있었습니다(사용 PC 시계가 느림). 서명 시각 허용 범위(2분) 안이라 결과에 영향이 없었습니다.
-- 원본: `evidence/step12-live-2026-10-15-full.json` (이전 A 단독 실행: `evidence/step12-live-2026-10-15.json`)
+- 원본: `evidence/step12-live-2026-10-15-fixed.json` (수정 전 배포: `evidence/step12-live-2026-10-15-full.json`, A 단독: `evidence/step12-live-2026-10-15.json`)
 
 | 단계 | 구분 | 요청 | 기대 | 실제 | 요청 ID(x-vercel-id) | 서버 시각(Date) | 판정 |
 |---|---|---|---|---|---|---|---|
-| 1·2 | 금지 | GET /data.json · 토큰 없음 | 404 | 404 | `icn1::c6h4k-1792026613999-3df2a325f0d6` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 1·2 | 정상 | GET / (화면) · 토큰 없음 | 200 | 200 | `icn1::fdfx5-1792026614013-256a63df0041` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 3 | 금지 | GET /api/notes · 토큰 없음 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::iad1::kqhhz-1792026614037-59bdad845c58` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 3 | 금지 | GET /api/notes · 위조 토큰 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::iad1::vtd5w-1792026614353-bbcbbc2eebe8` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 4 | 정상 | POST /api/notes · 본인 · 서명 | 201 | 201 | `icn1::iad1::7ctvb-1792026615162-160f7a80d643` | Thu, 15 Oct 2026 01:10:16 GMT | 통과 |
-| 4 | 정상 | GET /api/notes/{내 시험 메모} · 본인 · 서명 | 200 | 200 | `icn1::iad1::vtd5w-1792026616431-b9aab23dd7d5` | Thu, 15 Oct 2026 01:10:18 GMT | 통과 |
-| 4 | 정상 | GET /api/notes · 본인 · 서명 | 200 | 200 | `icn1::iad1::c6h4k-1792026618371-c620f52edfd4` | Thu, 15 Oct 2026 01:10:19 GMT | 통과 |
-| 4 | 정상 | PUT /api/notes/{내 시험 메모} · 본인 · 서명 | 200 | 200 | `icn1::iad1::c6h4k-1792026620052-1ce65fdc0f3a` | Thu, 15 Oct 2026 01:10:22 GMT | 통과 |
-| 4 | 금지 | GET /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::h72cr-1792026622512-1849487f9285` | Thu, 15 Oct 2026 01:10:23 GMT | 통과 |
-| 4 | 금지 | PUT /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::vtd5w-1792026623576-00111ab04ee1` | Thu, 15 Oct 2026 01:10:24 GMT | 통과 |
-| 4 | 금지 | DELETE /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::dqbhg-1792026624881-7754bc08fa56` | Thu, 15 Oct 2026 01:10:26 GMT | 통과 |
+| 1·2 | 금지 | GET /data.json · 토큰 없음 | 404 | 404 | `icn1::p56kn-1792029101314-84e5fb424662` | Thu, 15 Oct 2026 01:51:41 GMT | 통과 |
+| 1·2 | 정상 | GET / (화면) · 토큰 없음 | 200 | 200 | `icn1::p56kn-1792029101337-70435703f929` | Thu, 15 Oct 2026 01:51:41 GMT | 통과 |
+| 3 | 금지 | GET /api/notes · 토큰 없음 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::iad1::7kfhq-1792029101603-0f27cb682da4` | Thu, 15 Oct 2026 01:51:41 GMT | 통과 |
+| 3 | 금지 | GET /api/notes · 위조 토큰 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::7f72n-1792029102008-27defa18f9e0` | Thu, 15 Oct 2026 01:51:42 GMT | 통과 |
+| 4 | 정상 | POST /api/notes · 본인 · 서명 | 201 | 201 | `icn1::iad1::7f72n-1792029103767-6e7ae4da7899` | Thu, 15 Oct 2026 01:51:45 GMT | 통과 |
+| 4 | 정상 | GET /api/notes/{내 시험 메모} · 본인 · 서명 | 200 | 200 | `icn1::iad1::7f72n-1792029106047-fbb7cf1cc6f7` | Thu, 15 Oct 2026 01:51:48 GMT | 통과 |
+| 4 | 정상 | GET /api/notes · 본인 · 서명 | 200 | 200 | `icn1::iad1::j5rzz-1792029108145-b2c07536f666` | Thu, 15 Oct 2026 01:51:49 GMT | 통과 |
+| 4 | 정상 | PUT /api/notes/{내 시험 메모} · 본인 · 서명 | 200 | 200 | `icn1::iad1::c6h4k-1792029109854-a88a9d8b2bc6` | Thu, 15 Oct 2026 01:51:51 GMT | 통과 |
+| 4 | 금지 | GET /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::7kfhq-1792029111560-4e775ab5582d` | Thu, 15 Oct 2026 01:51:52 GMT | 통과 |
+| 4 | 금지 | PUT /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::7kfhq-1792029113083-ec94eeb9a774` | Thu, 15 Oct 2026 01:51:54 GMT | 통과 |
+| 4 | 금지 | DELETE /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::7kfhq-1792029114750-0687e3b57a20` | Thu, 15 Oct 2026 01:51:55 GMT | 통과 |
 | 5 | 금지 | 브라우저 공개 키로 Supabase notes 직접 호출 | - | - | - | - | 미실행 |
-| 6 | 금지 | GET /api/notes · 본인 토큰 · 기기 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::c6h4k-1792026614664-b1994eb39e03` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 6 | 금지 | GET /api/notes · 본인 토큰 · 없는 기기 세션으로 서명 | 403 DEVICE_NOT_APPROVED | 403 DEVICE_NOT_APPROVED | `icn1::7ctvb-1792026614888-f7439b455033` | Thu, 15 Oct 2026 01:10:15 GMT | 통과 |
-| 6 | 준비 | POST /api/device/key-register · 시험용 기기 키 승인 요청 | 201 · status pending(승인 대기) | 201 · 조건 맞음 | `icn1::iad1::4m42n-1792026651596-caadb09d8041` | Thu, 15 Oct 2026 01:10:52 GMT | 통과 |
-| 6 | 금지 | POST /api/device/key-session · 승인 전 시험용 기기 | 200 · approved false, 기기 세션 없음 | 200 · 조건 맞음 | `icn1::iad1::h72cr-1792026654171-8994f670e449` | Thu, 15 Oct 2026 01:10:55 GMT | 통과 |
+| 6 | 금지 | GET /api/notes · 본인 토큰 · 기기 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::7f72n-1792029102117-722e0d95aed1` | Thu, 15 Oct 2026 01:51:42 GMT | 통과 |
+| 6 | 금지 | GET /api/notes · 본인 토큰 · 없는 기기 세션으로 서명 | 403 DEVICE_NOT_APPROVED | 403 DEVICE_NOT_APPROVED | `icn1::7f72n-1792029102893-cf654d86d129` | Thu, 15 Oct 2026 01:51:43 GMT | 통과 |
+| 6 | 준비 | POST /api/device/key-register · 시험용 기기 키 승인 요청 | 201 · status pending(승인 대기) | 201 · 조건 맞음 | `icn1::iad1::7f72n-1792029144037-967cd4f664a6` | Thu, 15 Oct 2026 01:52:24 GMT | 통과 |
+| 6 | 금지 | POST /api/device/key-session · 승인 전 시험용 기기 | 200 · approved false, 기기 세션 없음 | 200 · 조건 맞음 | `icn1::iad1::p56kn-1792029146765-edcc1ba11df5` | Thu, 15 Oct 2026 01:52:28 GMT | 통과 |
 | 7 | 금지 | 복합 이상 접속 재확인(step_up) | - | - | - | - | 미실행 |
-| 8 | 금지 | GET /api/notes?owner_id=… · 본인 · 서명 | 400 QUERY_NOT_ALLOWED | 400 QUERY_NOT_ALLOWED | `icn1::iad1::dqbhg-1792026626266-421aae7734e1` | Thu, 15 Oct 2026 01:10:26 GMT | 통과 |
-| 8 | 금지 | POST /api/notes 본문 role · 본인 · 서명 | 403 ROLE_NOT_TRUSTED | 403 ROLE_NOT_TRUSTED | `icn1::iad1::dqbhg-1792026627078-9b95a9e16fb9` | Thu, 15 Oct 2026 01:10:27 GMT | 통과 |
-| 8 | 금지 | POST /api/notes 본문 owner_id · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::dqbhg-1792026627860-d6fda88933ef` | Thu, 15 Oct 2026 01:10:28 GMT | 통과 |
-| 8 | 참고 | GET /api/notices · 본인 토큰 | 404 | 404 | `icn1::dqbhg-1792026628676-0544c874efd2` | Thu, 15 Oct 2026 01:10:28 GMT | 참고(일치) |
+| 8 | 금지 | GET /api/notes?owner_id=… · 본인 · 서명 | 400 QUERY_NOT_ALLOWED | 400 QUERY_NOT_ALLOWED | `icn1::iad1::7kfhq-1792029115980-b74e2d0a511f` | Thu, 15 Oct 2026 01:51:56 GMT | 통과 |
+| 8 | 금지 | POST /api/notes 본문 role · 본인 · 서명 | 403 ROLE_NOT_TRUSTED | 403 ROLE_NOT_TRUSTED | `icn1::iad1::fmght-1792029116809-549504436340` | Thu, 15 Oct 2026 01:51:57 GMT | 통과 |
+| 8 | 금지 | POST /api/notes 본문 owner_id · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::7ctvb-1792029117598-4c6b519e615d` | Thu, 15 Oct 2026 01:51:58 GMT | 통과 |
+| 8 | 참고 | GET /api/notices · 본인 토큰 | 404 | 404 | `icn1::5vf65-1792029118487-0938e2ee5fca` | Thu, 15 Oct 2026 01:51:58 GMT | 참고(일치) |
 | 9 | 금지 | 낯선 네트워크 다량 조회 → 기기 회수 | - | - | - | - | 미실행 |
-| 10 | 준비 | PUT /api/notes/{내 시험 메모} · 내용 변조 · 서명 | 200 | 200 | `icn1::iad1::dqbhg-1792026628703-31e0c0dd234f` | Thu, 15 Oct 2026 01:10:29 GMT | 통과 |
-| 10 | 정상 | POST /api/restore {내 시험 메모} · 서명 | 200 · 복구 응답 verified 모든 칸 true | 200 · 조건 맞음 | `icn1::iad1::h72cr-1792026629982-23f3dfb174e3` | Thu, 15 Oct 2026 01:10:36 GMT | 통과 |
-| 10 | 금지 | POST /api/restore {남의 메모} · 서명 | 404 BACKUP_NOT_FOUND | 404 BACKUP_NOT_FOUND | `icn1::iad1::dqbhg-1792026647595-ba5e71e16917` | Thu, 15 Oct 2026 01:10:48 GMT | 통과 |
-| 10 | 금지 | POST /api/restore · 본인 토큰 · 기기 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::n8sl4-1792026639051-495474200253` | Thu, 15 Oct 2026 01:10:39 GMT | 통과 |
-| 10 | 금지 | POST /api/restore 본문 {id, owner_id} · 서명 | 400 INVALID_RESTORE_REQUEST | 400 INVALID_RESTORE_REQUEST | `icn1::iad1::n8sl4-1792026639165-19ad73f7dc72` | Thu, 15 Oct 2026 01:10:40 GMT | 통과 |
-| 11 | 정상 | GET /api/notes/{내 시험 메모} · 정상 서명 | 200 | 200 | `icn1::iad1::vtd5w-1792026640188-8e674a01105e` | Thu, 15 Oct 2026 01:10:42 GMT | 통과 |
-| 11 | 금지 | {내 시험 메모} 조회로 서명 → 다른 메모 ID로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::vtd5w-1792026642691-69db0308c5c9` | Thu, 15 Oct 2026 01:10:43 GMT | 통과 |
-| 11 | 금지 | GET으로 서명 → DELETE로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::vtd5w-1792026643130-058c15fab87d` | Thu, 15 Oct 2026 01:10:43 GMT | 통과 |
-| 11 | 금지 | POST /api/notes로 서명 → POST /api/restore로 보냄(같은 본문) | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::vtd5w-1792026643576-923a60a503cc` | Thu, 15 Oct 2026 01:10:44 GMT | 통과 |
-| 11 | 금지 | PUT 본문 A로 서명 → 본문 B로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::c6h4k-1792026644065-a22963fba843` | Thu, 15 Oct 2026 01:10:44 GMT | 통과 |
-| 11 | 정상 | 재전송 시험 1회째(같은 서명 첫 사용) | 200 | 200 | `icn1::iad1::c6h4k-1792026644419-07c559dd8673` | Thu, 15 Oct 2026 01:10:46 GMT | 통과 |
-| 11 | 금지 | 재전송 시험 2회째(같은 서명·번호 다시) | 403 DEVICE_PROOF_REPLAYED | 403 DEVICE_PROOF_REPLAYED | `icn1::c6h4k-1792026646872-9c12e7112072` | Thu, 15 Oct 2026 01:10:47 GMT | 통과 |
-| 11 | 금지 | 5분 전 시각으로 서명 | 403 DEVICE_PROOF_EXPIRED | 403 DEVICE_PROOF_EXPIRED | `icn1::c6h4k-1792026647494-47fb9e84400e` | Thu, 15 Oct 2026 01:10:47 GMT | 통과 |
-| 12 괴물① | 금지 | 괴물 ① 1: GET /api/notes/{남의 메모} · 토큰 없음 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::iad1::kxdsp-1792026648954-34e7b93c9207` | Thu, 15 Oct 2026 01:10:49 GMT | 통과 |
-| 12 괴물① | 금지 | 괴물 ① 2(곧바로): GET /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::kxdsp-1792026649275-747a7a5d3aee` | Thu, 15 Oct 2026 01:10:50 GMT | 통과 |
-| 12 괴물② | 금지 | 괴물 ② 1: GET /api/notes · 본인 토큰 · 미등록(서명 없음) | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::zt4s2-1792026614773-f6d3bb6477ca` | Thu, 15 Oct 2026 01:10:14 GMT | 통과 |
-| 12 괴물③ | 금지 | 괴물 ③ 1(복구 직후): PUT /api/notes/{내 시험 메모} · 본인 토큰 · 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::c6h4k-1792026636193-a72acd148dd8` | Thu, 15 Oct 2026 01:10:36 GMT | 통과 |
-| 12 괴물③ | 참고 | 괴물 ③ 2: GET /api/notices · 본인 토큰 | 404 | 404 | `icn1::c6h4k-1792026636306-f2822dd43221` | Thu, 15 Oct 2026 01:10:36 GMT | 참고(일치) |
-| 12 괴물③ | 정상 | 괴물 ③ 뒤: GET /api/notes/{내 시험 메모} · 서명(복구 내용 그대로) | 200 | 200 | `icn1::iad1::fmght-1792026636331-b56beeaf2536` | Thu, 15 Oct 2026 01:10:38 GMT | 통과 |
-| 6 | 정상 | POST /api/device/key-session · 승인된 시험용 기기 | 200 · approved true, 기기 세션 있음 | 200 · 조건 맞음 | `icn1::iad1::p56kn-1792026693961-1a8c05f3aedf` | Thu, 15 Oct 2026 01:11:36 GMT | 통과 |
-| 6 | 정상 | GET /api/notes/{내 시험 메모} · 시험용 기기 서명 | 200 | 200 | `icn1::iad1::kxdsp-1792026696836-7607ac6fd014` | Thu, 15 Oct 2026 01:11:38 GMT | 통과 |
-| 12 괴물② | 금지 | 괴물 ② 2: GET /api/notes/{내 시험 메모} · 회수된 시험용 기기 서명 | 403 DEVICE_NOT_APPROVED | 403 DEVICE_NOT_APPROVED | `icn1::xd5dq-1792026739306-438d79e4b6f0` | Thu, 15 Oct 2026 01:12:19 GMT | 통과 |
-| 12 괴물② | 금지 | POST /api/device/key-session · 회수된 시험용 기기 | 200 · status revoked, 기기 세션 없음 | 200 · 조건 맞음 | `icn1::iad1::xd5dq-1792026741083-23548036618f` | Thu, 15 Oct 2026 01:12:22 GMT | 통과 |
-| 4 | 정상 | DELETE /api/notes/{내 시험 메모} · 본인 · 서명(시험 메모 정리) | 204 | 204 | `icn1::iad1::h72cr-1792026742505-6b344a7f6022` | Thu, 15 Oct 2026 01:12:24 GMT | 통과 |
+| 10 | 준비 | PUT /api/notes/{내 시험 메모} · 내용 변조 · 서명 | 200 | 200 | `icn1::iad1::5vf65-1792029118503-f287ec42419f` | Thu, 15 Oct 2026 01:51:59 GMT | 통과 |
+| 10 | 정상 | POST /api/restore {내 시험 메모} · 서명 | 200 · 복구 응답 verified 모든 칸 true | 200 · 조건 맞음 | `icn1::iad1::tjwwj-1792029119889-505808e1a432` | Thu, 15 Oct 2026 01:52:07 GMT | 통과 |
+| 10 | 금지 | POST /api/restore {남의 메모} · 서명 | 404 BACKUP_NOT_FOUND | 404 BACKUP_NOT_FOUND | `icn1::iad1::7f72n-1792029139303-58dcdc06fb64` | Thu, 15 Oct 2026 01:52:20 GMT | 통과 |
+| 10 | 금지 | POST /api/restore · 본인 토큰 · 기기 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::7f72n-1792029130106-ee4729c182c7` | Thu, 15 Oct 2026 01:52:10 GMT | 통과 |
+| 10 | 금지 | POST /api/restore 본문 {id, owner_id} · 서명 | 400 INVALID_RESTORE_REQUEST | 400 INVALID_RESTORE_REQUEST | `icn1::iad1::7f72n-1792029130215-c95c745404da` | Thu, 15 Oct 2026 01:52:11 GMT | 통과 |
+| 11 | 정상 | GET /api/notes/{내 시험 메모} · 정상 서명 | 200 | 200 | `icn1::iad1::7f72n-1792029131770-92a3b158d856` | Thu, 15 Oct 2026 01:52:14 GMT | 통과 |
+| 11 | 금지 | {내 시험 메모} 조회로 서명 → 다른 메모 ID로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::5vf65-1792029134264-9eb50fcaf88d` | Thu, 15 Oct 2026 01:52:15 GMT | 통과 |
+| 11 | 금지 | GET으로 서명 → DELETE로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::5vf65-1792029135102-34da7e324661` | Thu, 15 Oct 2026 01:52:15 GMT | 통과 |
+| 11 | 금지 | POST /api/notes로 서명 → POST /api/restore로 보냄(같은 본문) | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::c6h4k-1792029135556-5b2ec5f4c10c` | Thu, 15 Oct 2026 01:52:15 GMT | 통과 |
+| 11 | 금지 | PUT 본문 A로 서명 → 본문 B로 보냄 | 403 DEVICE_SIGNATURE_INVALID | 403 DEVICE_SIGNATURE_INVALID | `icn1::5vf65-1792029136008-2d196ff55b08` | Thu, 15 Oct 2026 01:52:16 GMT | 통과 |
+| 11 | 정상 | 재전송 시험 1회째(같은 서명 첫 사용) | 200 | 200 | `icn1::iad1::5vf65-1792029136393-951342cf6174` | Thu, 15 Oct 2026 01:52:18 GMT | 통과 |
+| 11 | 금지 | 재전송 시험 2회째(같은 서명·번호 다시) | 403 DEVICE_PROOF_REPLAYED | 403 DEVICE_PROOF_REPLAYED | `icn1::5vf65-1792029138555-04b1d870604b` | Thu, 15 Oct 2026 01:52:19 GMT | 통과 |
+| 11 | 금지 | 5분 전 시각으로 서명 | 403 DEVICE_PROOF_EXPIRED | 403 DEVICE_PROOF_EXPIRED | `icn1::7f72n-1792029139202-37b9a9a2c6cc` | Thu, 15 Oct 2026 01:52:19 GMT | 통과 |
+| 12 괴물① | 금지 | 괴물 ① 1: GET /api/notes/{남의 메모} · 토큰 없음 | 401 LOGIN_REQUIRED | 401 LOGIN_REQUIRED | `icn1::iad1::tjwwj-1792029140620-54bdd1e5352d` | Thu, 15 Oct 2026 01:52:20 GMT | 통과 |
+| 12 괴물① | 금지 | 괴물 ① 2(곧바로): GET /api/notes/{남의 메모} · 본인 · 서명 | 403 OWNER_MISMATCH | 403 OWNER_MISMATCH | `icn1::iad1::7f72n-1792029140912-884620a9e5dc` | Thu, 15 Oct 2026 01:52:22 GMT | 통과 |
+| 12 괴물② | 금지 | 괴물 ② 1: GET /api/notes · 본인 토큰 · 미등록(서명 없음) | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::7f72n-1792029102770-c2b6adeeb9a8` | Thu, 15 Oct 2026 01:51:42 GMT | 통과 |
+| 12 괴물③ | 금지 | 괴물 ③ 1(복구 직후): PUT /api/notes/{내 시험 메모} · 본인 토큰 · 서명 없음 | 403 DEVICE_PROOF_REQUIRED | 403 DEVICE_PROOF_REQUIRED | `icn1::dqbhg-1792029127562-fa76b1be8d93` | Thu, 15 Oct 2026 01:52:07 GMT | 통과 |
+| 12 괴물③ | 참고 | 괴물 ③ 2: GET /api/notices · 본인 토큰 | 404 | 404 | `icn1::dqbhg-1792029127679-53c944c98656` | Thu, 15 Oct 2026 01:52:07 GMT | 참고(일치) |
+| 12 괴물③ | 정상 | 괴물 ③ 뒤: GET /api/notes/{내 시험 메모} · 서명(복구 내용 그대로) | 200 | 200 | `icn1::iad1::dqbhg-1792029127694-b4222d868f71` | Thu, 15 Oct 2026 01:52:09 GMT | 통과 |
+| 6 | 정상 | POST /api/device/key-session · 승인된 시험용 기기 | 200 · approved true, 기기 세션 있음 | 200 · 조건 맞음 | `icn1::iad1::sxsmz-1792029237729-1e56d66eb596` | Thu, 15 Oct 2026 01:54:00 GMT | 통과 |
+| 6 | 정상 | GET /api/notes/{내 시험 메모} · 시험용 기기 서명 | 200 | 200 | `icn1::iad1::sxsmz-1792029240268-153805f4e6cd` | Thu, 15 Oct 2026 01:54:03 GMT | 통과 |
+| 12 괴물② | 금지 | 괴물 ② 2: GET /api/notes/{내 시험 메모} · 회수된 시험용 기기 서명 | 403 DEVICE_NOT_APPROVED | 403 DEVICE_NOT_APPROVED | `icn1::7kfhq-1792029294377-02d99cbe08d9` | Thu, 15 Oct 2026 01:54:55 GMT | 통과 |
+| 12 괴물② | 금지 | POST /api/device/key-session · 회수된 시험용 기기 | 200 · status revoked, 기기 세션 없음 | 200 · 조건 맞음 | `icn1::iad1::7kfhq-1792029296285-39140d015f17` | Thu, 15 Oct 2026 01:54:57 GMT | 통과 |
+| 4 | 정상 | DELETE /api/notes/{내 시험 메모} · 본인 · 서명(시험 메모 정리) | 204 | 204 | `icn1::iad1::7kfhq-1792029297297-0ad57dac3703` | Thu, 15 Oct 2026 01:54:59 GMT | 통과 |
 | 12 | 금지 | 41종 공격 전체 | - | - | - | - | 미실행 |
 
 
