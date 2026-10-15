@@ -22,15 +22,13 @@ function deployedApp(config) {
   return app;
 }
 
-// 받은 응답의 상태와 Vercel 요청 ID(x-vercel-id)만 꺼냅니다. 응답이 없으면 null.
-const REQUEST_ID = /^[A-Za-z0-9:_-]{1,120}$/u;
+// 받은 응답의 HTTP 상태만 꺼냅니다. 응답이 없으면 null.
 async function responseOf(url) {
   try {
     const response = await fetch(url, {
       redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
     });
-    const id = response.headers?.get?.('x-vercel-id') ?? '';
-    return { status: response.status, requestId: REQUEST_ID.test(id) ? id : null };
+    return { status: response.status };
   } catch {
     return null;
   }
@@ -57,12 +55,9 @@ async function firstStageCheck(config, app) {
 
 // 12단계 심판 「실행 기록 대조」: 요청이 끝나지 않아(네트워크 차단·시간 초과 등) 받은 HTTP 상태가 없으면
 // 결과를 짐작하지 않고 정해진 미실행 표시 'not_run'만 적습니다. 상태를 받았으면 그 상태를 그대로 적습니다.
-// 받은 응답이 있으면 그 응답의 요청 ID(x-vercel-id)도 그대로 붙입니다(심판 기록과 같은 요청인지 맞춰 볼 수 있게).
-const describe = (res, blockedStatus) => {
-  if (!res) return 'not_run';
-  const head = res.status === blockedStatus ? `HTTP ${res.status}로 막힘` : `HTTP ${res.status} (기대와 다름)`;
-  return res.requestId ? `${head} (요청 ID ${res.requestId})` : head;
-};
+// 12단계 심판 「실행 기록 대조」: observed에는 실제로 받은 HTTP 상태만 적습니다(예: "HTTP 404").
+// 기대와 같은지 다른지, 요청 ID 같은 다른 글은 붙이지 않습니다. 응답을 받지 못했으면 'not_run'.
+const describe = (res) => (res ? `HTTP ${res.status}` : 'not_run');
 
 // 허용하는 배포 주소: 이 저장소 프로젝트의 커밋별 Vercel 배포 주소(<저장소 이름>-<배포 해시>-<팀>.vercel.app)
 // 또는 aleph.config.json에 적힌 주소와 같은 호스트. 그 밖의 호스트는 받지 않습니다.
@@ -112,10 +107,10 @@ export async function runAttackChecks(config) {
   const oneNote = await responseOf(new URL(`/api/notes/${sampleId}`, target));
   return [
     { attackId: 'anonymous_note_read', expected: '공개 data.json이 없어 404',
-      observed: describe(dataJson, 404) },
+      observed: describe(dataJson) },
     { attackId: 'anonymous_note_list', expected: '로그인 없는 메모 목록 요청은 401',
-      observed: describe(noteList, 401) },
+      observed: describe(noteList) },
     { attackId: 'anonymous_other_note_read', expected: '로그인 없는 메모 한 건 요청은 401',
-      observed: describe(oneNote, 401) },
+      observed: describe(oneNote) },
   ];
 }

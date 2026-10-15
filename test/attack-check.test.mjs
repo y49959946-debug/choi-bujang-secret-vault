@@ -32,7 +32,7 @@ test('같은 저장소의 /aleph.json 이 알려 주는 배포 주소로, 점검
   assert.deepEqual(sent.map((s) => s.path), ['/data.json', '/api/notes', '/api/notes/00000000-0000-4000-8000-000000000001']);
   for (const s of sent) { assert.equal(s.origin, UNIQUE); assert.equal(s.credentials, 'omit'); }
   assert.equal(maxInFlight, 1, '동시에 둘 이상 보내지 않음');
-  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404로 막힘', 'HTTP 401로 막힘', 'HTTP 401로 막힘']);
+  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'HTTP 401', 'HTTP 401']);
 });
 
 test('다른 저장소이거나 모양이 틀린 /aleph.json 이면 설정 주소를 그대로 쓴다', async () => {
@@ -50,23 +50,21 @@ test('다른 저장소이거나 모양이 틀린 /aleph.json 이면 설정 주�
   }
 });
 
-test('기대와 다른 상태도 그대로 드러낸다', async () => {
+test('기대와 다른 상태도 받은 그대로 적는다', async () => {
   const rows = await withFetch(async (url) => (new URL(url).pathname === '/aleph.json' ? identity() : new Response(null, { status: 200 })), () => runAttackChecks(config));
-  for (const r of rows) assert.equal(r.observed, 'HTTP 200 (기대와 다름)');
+  for (const r of rows) assert.equal(r.observed, 'HTTP 200');
 });
 
-test('실제 커밋별 배포 주소 모양을 받아들이고, 받은 응답의 요청 ID를 그대로 붙인다', async () => {
+test('실제 커밋별 배포 주소 모양을 받아들이고, observed에는 받은 HTTP 상태 말고 다른 글을 붙이지 않는다', async () => {
   const real = 'https://choi-bujang-secret-vault-5s51eqij3-aleph-5.vercel.app';
   const origins = new Set();
   const rows = await withFetch(async (url) => {
     const u = new URL(url);
     if (u.pathname === '/aleph.json') return identity({ publicAppUrl: real });
     origins.add(u.origin);
-    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401, headers: { 'x-vercel-id': `icn1::abc12-${u.pathname.length}` } });
+    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401, headers: { 'x-vercel-id': 'icn1::abc12-1' } });
   }, () => runAttackChecks(config));
   assert.deepEqual([...origins], [real]);
-  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404로 막힘 (요청 ID icn1::abc12-10)', 'HTTP 401로 막힘 (요청 ID icn1::abc12-10)', 'HTTP 401로 막힘 (요청 ID icn1::abc12-47)']);
-  const odd = await withFetch(async (url) => (new URL(url).pathname === '/aleph.json' ? identity({ publicAppUrl: real })
-    : new Response(null, { status: 404, headers: { 'x-vercel-id': '<script>' } })), () => runAttackChecks(config));
-  assert.equal(odd[0].observed, 'HTTP 404로 막힘', '모양이 이상한 요청 ID는 붙이지 않음');
+  for (const r of rows) assert.match(r.observed, /^(HTTP [1-5]\d\d|not_run)$/u);
+  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'HTTP 401', 'HTTP 401']);
 });
