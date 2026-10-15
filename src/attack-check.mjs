@@ -2,7 +2,7 @@
 // Never return tokens, private keys, real names, or note bodies.
 //
 // 1단계: 비로그인 화면에서 공개 가상 메모(data.json)가 보이는지 확인합니다.
-// 2단계부터(현재 8단계): 같은 배포 주소에 로그인 없이 요청을 보내, 보호가 실제로 막는지 확인합니다.
+// 2단계부터(현재 12단계): 같은 배포 주소에 로그인 없이 요청을 보내, 보호가 실제로 막는지 확인합니다.
 //   - 공개 data.json은 더 이상 없어야 합니다(404).
 //   - 메모 목록·메모 한 건 API는 로그인 없이 열리지 않아야 합니다(401).
 //   토큰·쿠키를 보내지 않고, 응답 본문은 기록하지 않으며 상태 코드만 남깁니다.
@@ -52,8 +52,10 @@ async function firstStageCheck(config, app) {
     observed: visible ? '비로그인 요청에서 공개 가상 메모 확인 표시가 보임' : `비로그인 요청에서 확인 표시가 보이지 않음 (HTTP ${response.status})` }];
 }
 
+// 12단계 심판 「실행 기록 대조」: 요청이 끝나지 않아(네트워크 차단·시간 초과 등) 받은 HTTP 상태가 없으면
+// 결과를 짐작하지 않고 정해진 미실행 표시 'not_run'만 적습니다. 상태를 받았으면 그 상태를 그대로 적습니다.
 const describe = (status, blockedStatus) => (status === null
-  ? '요청이 완료되지 않음(미확인)'
+  ? 'not_run'
   : status === blockedStatus ? `HTTP ${status}로 막힘` : `HTTP ${status} (기대와 다름)`);
 
 export async function runAttackChecks(config) {
