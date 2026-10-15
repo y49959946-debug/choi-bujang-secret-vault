@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runAttackChecks } from '../src/attack-check.mjs';
 
+process.env.ATTACK_CHECK_GAP_MS = '0'; // 시험에서는 대기 없이
 const repo = resolve(import.meta.dirname, '..');
 const config = JSON.parse(readFileSync(join(repo, 'aleph.config.json'), 'utf8'));
 const SUBMITTED = new URL(config.publicAppUrl).origin;
@@ -57,4 +58,17 @@ test('배포(Vercel)가 보낸 응답이 아니면(요청 ID 머리글 없음·�
     ? new Response(null, { status: 403 }) : new Response(null, { status: new URL(url).pathname === '/data.json' ? 404 : 401, headers: VID })), () => runAttackChecks(config));
   assert.deepEqual(mixed.map((r) => r.observed), ['HTTP 404', 'not_run', 'HTTP 401']);
   for (const r of mixed) assert.doesNotMatch(r.observed, /icn1|iad1/u, '요청 ID 값은 적지 않음');
+});
+
+test('기본 대기: 요청 사이와 마지막 뒤에 기다리고(1.5초), 요청 순서·내용은 같다', async () => {
+  process.env.ATTACK_CHECK_GAP_MS = '';
+  const times = [];
+  const started = Date.now();
+  try {
+    const rows = await withFetch(async (url) => { times.push(Date.now()); return new Response(null, { status: new URL(url).pathname === '/data.json' ? 404 : 401, headers: VID }); },
+      () => runAttackChecks(config));
+    assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'HTTP 401', 'HTTP 401']);
+    assert.ok(times[1] - times[0] >= 1400 && times[2] - times[1] >= 1400, '요청 사이 대기');
+    assert.ok(Date.now() - started >= 4300, '마지막 요청 뒤 대기 포함');
+  } finally { process.env.ATTACK_CHECK_GAP_MS = '0'; }
 });

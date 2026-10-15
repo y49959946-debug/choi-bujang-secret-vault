@@ -64,6 +64,15 @@ async function firstStageCheck(config, app) {
 // 결과를 짐작하지 않고 'not_run'만 적습니다.
 const describe = (res) => (res ? `HTTP ${res.status}` : 'not_run');
 
+const pause = (ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+// 대기 시간(밀리초). 시험에서만 ATTACK_CHECK_GAP_MS=0 으로 줄입니다. 0~10000 정수만 받습니다.
+function gapMs() {
+  const raw = process.env.ATTACK_CHECK_GAP_MS;
+  if (raw === undefined || raw === '') return 1500;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= 10000 ? n : 1500;
+}
+
 export async function runAttackChecks(config) {
   const app = deployedApp(config);
   if (config.step === 1) return firstStageCheck(config, app);
@@ -74,10 +83,16 @@ export async function runAttackChecks(config) {
   // 12단계 심판 「실행 기록 대조」: 세 점검은 제출한 배포 주소(aleph.config.json의 publicAppUrl,
   // 제출 화면의 "내 배포 주소"와 같은 주소)로만 보냅니다. 다른 주소를 찾아 바꾸지 않습니다.
   // 점검마다 요청 하나씩, 차례대로 보냅니다(같은 순간에 섞여 들어가지 않게).
+  // 12단계 시험(근거 없는 시도): 요청 사이와 마지막 요청 뒤에 잠깐 기다립니다(기본 1.5초).
+  // 요청 기록이 심판 쪽에 늦게 들어올 가능성을 시험하려는 것이며, 요청 내용·주소·기록 규칙은 바꾸지 않습니다.
+  const gap = gapMs();
   const sampleId = '00000000-0000-4000-8000-000000000001';
   const dataJson = await responseOf(new URL('/data.json', app));
+  await pause(gap);
   const noteList = await responseOf(new URL('/api/notes', app));
+  await pause(gap);
   const oneNote = await responseOf(new URL(`/api/notes/${sampleId}`, app));
+  await pause(gap);
   return [
     { attackId: 'anonymous_note_read', expected: '공개 data.json이 없어 404',
       observed: describe(dataJson) },
