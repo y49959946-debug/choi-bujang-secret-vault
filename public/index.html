@@ -62,6 +62,14 @@
     .ops caption { text-align: left; font-weight: 700; margin-bottom: 4px; }
     .ops th, .ops td { border-bottom: 1px solid #2b3d52; padding: 4px 6px; text-align: left; overflow-wrap: anywhere; }
     .ops details { margin-top: 12px; } .ops summary { cursor: pointer; color: #8ad8df; }
+    .live { margin-top: 18px; border-top: 1px solid #2b3d52; padding-top: 12px; }
+    .live h3 { margin: 0 0 6px; font-size: 16px; }
+    .live label { margin-top: 8px; }
+    .live-next { margin: 10px 0; padding: 10px 12px; border: 1px solid #c9a35a; border-radius: 10px; background: #3b2f1544; color: #ffe9c2; font-size: 14px; }
+    .live-next pre { white-space: pre-wrap; margin: 6px 0 0; font-size: 13px; color: #ecf4ff; }
+    .live-table { overflow-x: auto; }
+    .live-table table { min-width: 1180px; }
+    .live-table td:nth-child(1), .live-table td:nth-child(2), .live-table td:nth-child(4), .live-table td:nth-child(5), .live-table td:nth-child(6) { white-space: nowrap; }
     .offline { margin: 0 0 18px; padding: 12px 16px; border-radius: 12px; border: 1px solid #c9a35a; background: #3b2f1544; color: #ffe9c2; font-size: 15px; }
   </style>
 </head>
@@ -118,6 +126,24 @@
       <p class="hint" id="ops-meta"></p>
       <div class="ops-grid" id="ops-grid"></div>
       <details id="ops-records"><summary>가린 서버 기록 보기(화면 수치와 대조)</summary><div id="ops-tables"></div></details>
+      <section class="live" id="live">
+        <h3>1~11단계 실측표</h3>
+        <p class="hint">배포 API에 실제 요청을 보내 상태 코드·오류 코드, 서버가 붙인 요청 ID(<code>x-vercel-id</code>)와 서버 시각(<code>Date</code>)을 기록합니다. 기대와 실제가 같을 때만 통과이고, 보내지 않은 줄은 미실행입니다. 시험용 메모·시험용 기기만 쓰며 토큰·본문·전체 ID는 표와 파일에 남기지 않습니다. 이 화면을 새로고침하면 시험 상태가 사라지니 한 탭에서 1→2→3차까지 진행하세요.</p>
+        <label>남의 메모 ID(다른 시험 계정에서 「실측용 메모 만들기」로 만든 ID, 없으면 해당 줄은 미실행)
+          <input id="live-other" autocomplete="off" spellcheck="false" placeholder="00000000-0000-4000-8000-000000000000"></label>
+        <div class="row">
+          <button type="button" id="live-marker" class="ghost">실측용 메모 만들기(다른 계정 창에서)</button>
+          <button type="button" id="live-run1">1차 실행</button>
+          <button type="button" id="live-run2" class="ghost" disabled>2차 실행(시험 기기 승인 뒤)</button>
+          <button type="button" id="live-run3" class="ghost" disabled>3차 실행(시험 기기 회수 뒤)</button>
+          <button type="button" id="live-download" class="ghost" disabled>JSON 내려받기</button>
+        </div>
+        <p class="hint" id="live-marker-out" hidden>만든 메모 ID(시험 계정 A 창의 「남의 메모 ID」에 붙여 넣기): <code id="live-marker-id"></code></p>
+        <p class="error" id="live-error" role="alert"></p>
+        <div class="live-next" id="live-next" hidden></div>
+        <p class="hint" id="live-summary"></p>
+        <div class="live-table" id="live-table"></div>
+      </section>
     </section>
 
     <ul id="notes" aria-live="polite"><li>로그인 상태를 확인하는 중입니다.</li></ul>
@@ -399,13 +425,14 @@
       if (path === '/api/notes' && keys.length === 1 && keys[0] === 'id') return { path: `/api/notes/${params.get('id')}`, search: '' };
       return { path, search: search && search !== '?' ? search : '' };
     }
-    async function signRequest(method, path, bodyText) {
+    // proof·timestamp는 12단계 실측표가 시험용 기기·만료 시각 시험에만 넘깁니다(기본은 이 화면의 승인 기기·지금 시각).
+    async function signRequest(method, path, bodyText, { proof = device.proof, timestamp = Date.now() } = {}) {
       const url = new URL(path, location.origin);
       const target = normalizeTarget(url.pathname, url.search);
-      const timestamp = String(Date.now());
+      const ts = String(timestamp);
       const nonce = b64u(crypto.getRandomValues(new Uint8Array(18)));
-      const canonical = ['aleph-device-v1', method.toUpperCase(), target.path, target.search, await sha256Hex(bodyText), timestamp, nonce, device.proof.sessionId].join('\n');
-      return { 'X-Device-Session': device.proof.sessionId, 'X-Device-Timestamp': timestamp, 'X-Device-Nonce': nonce, 'X-Device-Signature': await signText(device.proof.signer, canonical) };
+      const canonical = ['aleph-device-v1', method.toUpperCase(), target.path, target.search, await sha256Hex(bodyText), ts, nonce, proof.sessionId].join('\n');
+      return { 'X-Device-Session': proof.sessionId, 'X-Device-Timestamp': ts, 'X-Device-Nonce': nonce, 'X-Device-Signature': await signText(proof.signer, canonical) };
     }
 
     async function postDevice(action, body) {
@@ -586,6 +613,193 @@
       } finally { opsLoad.disabled = false; }
     }
     opsLoad.addEventListener('click', loadOps);
+
+    // ----- 12단계 제작 2: 1~11단계 실측표 -----
+    // 실제 배포 API에 요청을 보내 응답의 상태·오류 코드와 x-vercel-id·Date만 기록합니다(본문·토큰·전체 ID는 남기지 않음).
+    // 변조·재전송 시험은 서명을 먼저 만든 뒤 그 머리글을 그대로 쓰고 경로·메서드·본문만 바꿔 보냅니다(일반 api()는 매번 새로 서명하므로 쓰지 않음).
+    const liveEls = {
+      other: document.querySelector('#live-other'), marker: document.querySelector('#live-marker'),
+      markerOut: document.querySelector('#live-marker-out'), markerId: document.querySelector('#live-marker-id'),
+      run1: document.querySelector('#live-run1'), run2: document.querySelector('#live-run2'), run3: document.querySelector('#live-run3'),
+      download: document.querySelector('#live-download'), error: document.querySelector('#live-error'),
+      next: document.querySelector('#live-next'), summary: document.querySelector('#live-summary'), table: document.querySelector('#live-table'),
+    };
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const live = { catalog: null, results: new Map(), ownId: null, otherId: null, testDev: null, startedAt: null, phaseDone: 0 };
+    async function liveCatalog() { live.catalog ??= await import('/live-catalog.js'); return live.catalog; }
+    async function tokenHeader() { const s = await validSession(); if (!s?.access_token) throw new Error('로그인이 필요합니다.'); return { Authorization: `Bearer ${s.access_token}` }; }
+    // 요청 한 번: 상태 코드, 허용 모양의 오류 코드, 요청 ID, 서버 시각만 남김
+    async function liveSend(method, path, { headers = {}, bodyText } = {}) {
+      const r = await fetch(path, { method, cache: 'no-store', headers: { ...headers, ...(bodyText !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: bodyText });
+      let body = null; try { body = await r.json(); } catch { body = null; }
+      return { status: r.status, body, requestId: r.headers.get('x-vercel-id'), serverTime: r.headers.get('date'), clientTime: new Date().toISOString() };
+    }
+    async function liveSigned(method, path, bodyObj, opts) {
+      const bodyText = bodyObj === undefined ? undefined : JSON.stringify(bodyObj);
+      return liveSend(method, path, { headers: { ...(await tokenHeader()), ...(await signRequest(method, path, bodyText ?? '', opts)) }, bodyText });
+    }
+    function liveRecord(id, resp, extra = {}) {
+      const c = live.catalog; const def = c.LIVE_ROWS.find((r) => r.id === id);
+      const actual = resp ? { status: resp.status, error: c.errorCodeOf(resp.body), check: def.expect?.check ? c.checkOf(def.expect.check, resp.body) : null } : null;
+      live.results.set(id, { def, actual, requestId: resp?.requestId ?? null, serverTime: resp?.serverTime ?? null, clientTime: resp?.clientTime ?? null, note: extra.note ?? null });
+      return resp;
+    }
+    const testMemo = (label) => ({ title: `12단계 실측 시험 메모(가상) ${label}`, body: `가상 내용 ${label} ${new Date().toISOString()}` });
+    async function testDeviceProve(purpose) {
+      const td = live.testDev;
+      const start = await postDevice('key-challenge', { deviceKey: td.pub, purpose });
+      if (start.status !== 200) return { status: start.status, body: start.data, requestId: null, serverTime: null, clientTime: new Date().toISOString() };
+      const signature = await signText(td.pair.privateKey, start.data.message);
+      return liveSend('POST', `/api/device/${purpose === 'register' ? 'key-register' : 'key-session'}`, {
+        headers: { ...(await tokenHeader()) },
+        bodyText: JSON.stringify({ challengeId: start.data.challengeId, deviceKey: td.pub, signature, ...(purpose === 'register' ? { label: '12단계 실측 시험용 기기' } : {}) }) });
+    }
+    function liveSqlBox(title, sql) {
+      liveEls.next.hidden = false;
+      liveEls.next.replaceChildren(el('p', { textContent: title }), el('pre', { textContent: sql }));
+    }
+    function liveRender() {
+      const c = live.catalog; if (!c) return;
+      const rows = c.LIVE_ROWS.map((def) => {
+        const r = live.results.get(def.id);
+        const expected = def.expect ? `${def.expect.status}${def.expect.error ? ` ${def.expect.error}` : ''}${def.expect.check ? ` · ${c.CHECKS[def.expect.check]}` : ''}` : '-';
+        const actual = r?.actual ? `${r.actual.status}${r.actual.error ? ` ${r.actual.error}` : ''}${r.actual.check === null || r.actual.check === undefined ? '' : r.actual.check ? ' · 조건 맞음' : ' · 조건 다름'}` : '-';
+        const verdict = c.verdictOf(def, r?.actual ?? null);
+        return { id: def.id, stage: def.stage, monster: def.monster, kind: def.kind, source: def.source, phase: def.phase, shape: def.shape, expected, actual,
+          requestId: r?.requestId ?? null, serverTime: r?.serverTime ?? null, clientTime: r?.clientTime ?? null, verdict, reason: def.reason ?? r?.note ?? null };
+      });
+      live.rows = rows;
+      const s = c.summarize(rows);
+      live.summary = s;
+      liveEls.summary.textContent = `배포 API 실측(이 표의 줄 수이며 과제의 41종 공격 목록과는 무관) ${s.api.run}/${s.api.total}줄 실행 · 통과 ${s.api.pass} · 실패 ${s.api.fail} · 미실행 ${s.api.notRun} (정상 허용 ${s.allowed.pass}/${s.allowed.total}, 금지 거부 ${s.denied.pass}/${s.denied.total}) · 집계 제외: SQL 확인 ${s.excluded.sql}, 참고 ${s.excluded.note}, 실행 불가 ${s.excluded.notRun}`;
+      liveEls.table.replaceChildren(table('실측표(요청 ID = 응답의 x-vercel-id, 서버 시각 = 응답의 Date)',
+        [['stage', '단계'], ['kind', '구분'], ['shape', '요청'], ['expected', '기대'], ['actual', '실제'], ['requestId', '요청 ID'], ['serverTime', '서버 시각'], ['verdict', '판정'], ['reason', '비고']],
+        rows.map((r) => ({ ...r, stage: r.monster ? `12 괴물${r.monster}` : r.stage }))));
+      liveEls.download.disabled = !live.results.size;
+    }
+    async function liveGuard(button, work) {
+      liveEls.error.textContent = ''; button.disabled = true;
+      try { await liveCatalog(); if (!device.proof) throw new Error('먼저 이 기기로 자료실을 여세요.'); await work(); }
+      catch (error) { liveEls.error.textContent = error.message ?? '실측 중 오류가 났습니다.'; }
+      finally { button.disabled = false; liveRender(); }
+    }
+    const randomId = () => crypto.randomUUID();
+
+    liveEls.marker.addEventListener('click', () => liveGuard(liveEls.marker, async () => {
+      const r = await liveSigned('POST', '/api/notes', { title: '12단계 실측 대상 메모(가상, 남의 메모 역할)', body: '가상 내용' });
+      if (r.status !== 201 || !r.body?.id) throw new Error('실측용 메모를 만들지 못했습니다.');
+      liveEls.markerId.textContent = r.body.id; liveEls.markerOut.hidden = false;
+    }));
+
+    liveEls.run1.addEventListener('click', () => liveGuard(liveEls.run1, async () => {
+      const other = liveEls.other.value.trim();
+      if (other && !UUID_RE.test(other)) throw new Error('남의 메모 ID 모양이 맞지 않습니다.');
+      live.results.clear(); live.ownId = null; live.testDev = null; live.otherId = other ? other.toLowerCase() : null;
+      live.startedAt = new Date().toISOString(); liveEls.run2.disabled = true; liveEls.run3.disabled = true; liveEls.next.hidden = true;
+      const T = await tokenHeader();
+      liveRecord('s1-public-data', await liveSend('GET', '/data.json'));
+      liveRecord('s1-home', await liveSend('GET', '/'));
+      liveRecord('s3-no-token', await liveSend('GET', '/api/notes'));
+      liveRecord('s3-forged-token', await liveSend('GET', '/api/notes', { headers: { Authorization: 'Bearer forged.tok.x' } }));
+      liveRecord('s6-unsigned', await liveSend('GET', '/api/notes', { headers: T }));
+      liveRecord('m2-unsigned', await liveSend('GET', '/api/notes', { headers: T }));
+      liveRecord('s6-fake-session', await liveSigned('GET', '/api/notes', undefined, { proof: { sessionId: randomId(), signer: device.proof.signer } }));
+      const made = liveRecord('s4-create', await liveSigned('POST', '/api/notes', testMemo('원본')));
+      live.ownId = made.status === 201 && UUID_RE.test(made.body?.id ?? '') ? made.body.id : null;
+      const own = live.ownId ? `/api/notes/${live.ownId}` : null;
+      if (own) {
+        liveRecord('s4-read-own', await liveSigned('GET', own));
+        liveRecord('s4-list-own', await liveSigned('GET', '/api/notes'));
+        liveRecord('s4-edit-own', await liveSigned('PUT', own, testMemo('수정')));
+      }
+      if (live.otherId) {
+        const o = `/api/notes/${live.otherId}`;
+        liveRecord('s4-read-other', await liveSigned('GET', o));
+        liveRecord('s4-edit-other', await liveSigned('PUT', o, testMemo('남의 메모 수정 시도')));
+        liveRecord('s4-delete-other', await liveSigned('DELETE', o));
+      }
+      liveRecord('s8-query-owner', await liveSigned('GET', `/api/notes?owner_id=${randomId()}`));
+      liveRecord('s8-body-role', await liveSigned('POST', '/api/notes', { ...testMemo('role'), role: 'instructor' }));
+      liveRecord('s8-body-owner', await liveSigned('POST', '/api/notes', { ...testMemo('owner'), owner_id: randomId() }));
+      liveRecord('s8-zone-note', await liveSend('GET', '/api/notices', { headers: T }));
+      if (own) {
+        liveRecord('s10-tamper', await liveSigned('PUT', own, testMemo('변조')));
+        liveRecord('s10-restore-own', await liveSigned('POST', '/api/restore', { id: live.ownId }));
+        liveRecord('m3-unsigned-edit', await liveSend('PUT', own, { headers: T, bodyText: JSON.stringify(testMemo('서명 없는 변경')) }));
+        liveRecord('m3-zone-note', await liveSend('GET', '/api/notices', { headers: T }));
+        liveRecord('m3-after-read', await liveSigned('GET', own));
+        liveRecord('s10-restore-unsigned', await liveSend('POST', '/api/restore', { headers: T, bodyText: JSON.stringify({ id: live.ownId }) }));
+        liveRecord('s10-restore-extra', await liveSigned('POST', '/api/restore', { id: live.ownId, owner_id: randomId() }));
+        liveRecord('s11-signed-ok', await liveSigned('GET', own));
+        const h1 = await signRequest('GET', own, '');
+        liveRecord('s11-tamper-id', await liveSend('GET', `/api/notes/${randomId()}`, { headers: { ...T, ...h1 } }));
+        const h2 = await signRequest('GET', own, '');
+        liveRecord('s11-tamper-method', await liveSend('DELETE', own, { headers: { ...T, ...h2 } }));
+        const routeBody = JSON.stringify({ id: live.ownId });
+        const h3 = await signRequest('POST', '/api/notes', routeBody);
+        liveRecord('s11-tamper-route', await liveSend('POST', '/api/restore', { headers: { ...T, ...h3 }, bodyText: routeBody }));
+        const bodyA = JSON.stringify(testMemo('서명한 본문'));
+        const h4 = await signRequest('PUT', own, bodyA);
+        liveRecord('s11-tamper-body', await liveSend('PUT', own, { headers: { ...T, ...h4 }, bodyText: JSON.stringify(testMemo('바꿔치기한 본문')) }));
+        const h5 = await signRequest('GET', own, '');
+        liveRecord('s11-replay-first', await liveSend('GET', own, { headers: { ...T, ...h5 } }));
+        liveRecord('s11-replay-second', await liveSend('GET', own, { headers: { ...T, ...h5 } }));
+        const h6 = await signRequest('GET', own, '', { timestamp: Date.now() - 5 * 60 * 1000 });
+        liveRecord('s11-expired', await liveSend('GET', own, { headers: { ...T, ...h6 } }));
+      }
+      if (live.otherId) {
+        liveRecord('s10-restore-other', await liveSigned('POST', '/api/restore', { id: live.otherId }));
+        liveRecord('m1-no-auth', await liveSend('GET', `/api/notes/${live.otherId}`));
+        liveRecord('m1-other', await liveSigned('GET', `/api/notes/${live.otherId}`));
+      }
+      // 시험용 기기(메모리 전용 키): 승인 요청 → 승인 전에는 세션 없음
+      const pair = await newKeyPair();
+      live.testDev = { pair, pub: await publicOf(pair), deviceId: null, proof: null };
+      const reg = liveRecord('s6-testdev-register', await testDeviceProve('register'));
+      live.testDev.deviceId = reg.body?.deviceId ?? null;
+      liveRecord('s6-testdev-before', await testDeviceProve('session'));
+      live.phaseDone = 1;
+      if (live.testDev.deviceId && own) {
+        liveEls.run2.disabled = false;
+        liveSqlBox(`1차 끝. Supabase SQL Editor에서 시험용 기기(앞자리 ${String(live.testDev.deviceId).slice(0, 8)})를 승인한 뒤 「2차 실행」을 누르세요. 이 탭은 새로고침하지 마세요.`,
+          `update public.device_credentials set status = 'approved', approved_at = now()\n where id::text like '${String(live.testDev.deviceId).slice(0, 8)}%' and status = 'pending'\nreturning left(id::text, 8) as id8, status;`);
+      }
+    }));
+
+    liveEls.run2.addEventListener('click', () => liveGuard(liveEls.run2, async () => {
+      if (live.phaseDone < 1 || !live.testDev || !live.ownId) throw new Error('1차 실행을 먼저 하세요.');
+      const r = liveRecord('s6-testdev-approved', await testDeviceProve('session'));
+      if (r.status === 200 && r.body?.approved === true && r.body.sessionId) {
+        live.testDev.proof = { sessionId: r.body.sessionId, signer: live.testDev.pair.privateKey };
+        liveRecord('s6-testdev-read', await liveSigned('GET', `/api/notes/${live.ownId}`, undefined, { proof: live.testDev.proof }));
+        live.phaseDone = 2; liveEls.run3.disabled = false;
+        liveSqlBox(`2차 끝. 이제 시험용 기기(앞자리 ${String(live.testDev.deviceId).slice(0, 8)})를 회수한 뒤 「3차 실행」을 누르세요.`,
+          `update public.device_credentials set status = 'revoked'\n where id::text like '${String(live.testDev.deviceId).slice(0, 8)}%' and status = 'approved'\nreturning left(id::text, 8) as id8, status;`);
+      } else {
+        throw new Error('시험용 기기가 아직 승인되지 않았습니다. SQL 결과(returning 1줄)를 확인한 뒤 다시 누르세요.');
+      }
+    }));
+
+    liveEls.run3.addEventListener('click', () => liveGuard(liveEls.run3, async () => {
+      if (live.phaseDone < 2 || !live.testDev?.proof) throw new Error('2차 실행을 먼저 하세요.');
+      liveRecord('m2-revoked', await liveSigned('GET', `/api/notes/${live.ownId}`, undefined, { proof: live.testDev.proof }));
+      liveRecord('m2-revoked-session', await testDeviceProve('session'));
+      liveRecord('s4-delete-own', await liveSigned('DELETE', `/api/notes/${live.ownId}`));
+      live.phaseDone = 3; liveEls.next.hidden = true;
+    }));
+
+    liveEls.download.addEventListener('click', async () => {
+      await liveCatalog(); liveRender();
+      let commit7 = null;
+      try { commit7 = String((await (await fetch('/aleph.json', { cache: 'no-store' })).json()).commit ?? '').slice(0, 7) || null; } catch { commit7 = null; }
+      const report = { schema: live.catalog.LIVE_SCHEMA, generatedAt: new Date().toISOString(), startedAt: live.startedAt, deployment: { origin: location.origin, commit7 },
+        phaseDone: live.phaseDone, otherMemoProvided: Boolean(live.otherId), testDevice8: live.testDev?.deviceId ? String(live.testDev.deviceId).slice(0, 8) : null,
+        summary: live.summary, note: '줄 수는 이 실측표의 요청 수이며, 과제의 41종 공격 목록은 받지 못해 대응 여부 미확인(통과로 세지 않음)', rows: live.rows };
+      const blob = new Blob([JSON.stringify(report, null, 2) + '\n'], { type: 'application/json' });
+      const a = el('a', { href: URL.createObjectURL(blob), download: `step12-live-${report.generatedAt.slice(0, 10)}.json` });
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+
 
     // 처음 열 때: 보관된 로그인 정보가 있으면 이어서 씁니다.
     purgeLegacyStoredLogin();

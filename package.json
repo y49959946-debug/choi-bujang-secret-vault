@@ -19,7 +19,8 @@
     "recovery:recheck": "node scripts/recovery-recheck.mjs",
     "test:app": "node --test test/app-shell.test.mjs",
     "test:device": "node --test test/device.test.mjs",
-    "test:ops": "node --test test/ops.test.mjs"
+    "test:ops": "node --test test/ops.test.mjs",
+    "test:live": "node --test test/live-catalog.test.mjs"
   },
   "engines": {
     "node": ">=22"
