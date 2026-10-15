@@ -37,6 +37,8 @@ test('같은 저장소의 /aleph.json 이 알려 주는 배포 주소로, 점검
 
 test('다른 저장소이거나 모양이 틀린 /aleph.json 이면 설정 주소를 그대로 쓴다', async () => {
   for (const bad of [identity({ repoUrl: 'https://github.com/someone/else' }), identity({ publicAppUrl: 'https://evil.example' }),
+    identity({ publicAppUrl: 'https://evil.vercel.app' }), identity({ publicAppUrl: 'https://other-app-5s51eqij3-aleph-5.vercel.app' }),
+    identity({ publicAppUrl: 'https://choi-bujang-secret-vault-5s51eqij3-aleph-5.vercel.app.evil.com' }),
     identity({ schema: 'x' }), new Response('nope', { status: 404 })]) {
     const origins = new Set();
     await withFetch(async (url) => {
@@ -51,4 +53,20 @@ test('다른 저장소이거나 모양이 틀린 /aleph.json 이면 설정 주�
 test('기대와 다른 상태도 그대로 드러낸다', async () => {
   const rows = await withFetch(async (url) => (new URL(url).pathname === '/aleph.json' ? identity() : new Response(null, { status: 200 })), () => runAttackChecks(config));
   for (const r of rows) assert.equal(r.observed, 'HTTP 200 (기대와 다름)');
+});
+
+test('실제 커밋별 배포 주소 모양을 받아들이고, 받은 응답의 요청 ID를 그대로 붙인다', async () => {
+  const real = 'https://choi-bujang-secret-vault-5s51eqij3-aleph-5.vercel.app';
+  const origins = new Set();
+  const rows = await withFetch(async (url) => {
+    const u = new URL(url);
+    if (u.pathname === '/aleph.json') return identity({ publicAppUrl: real });
+    origins.add(u.origin);
+    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401, headers: { 'x-vercel-id': `icn1::abc12-${u.pathname.length}` } });
+  }, () => runAttackChecks(config));
+  assert.deepEqual([...origins], [real]);
+  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404로 막힘 (요청 ID icn1::abc12-10)', 'HTTP 401로 막힘 (요청 ID icn1::abc12-10)', 'HTTP 401로 막힘 (요청 ID icn1::abc12-47)']);
+  const odd = await withFetch(async (url) => (new URL(url).pathname === '/aleph.json' ? identity({ publicAppUrl: real })
+    : new Response(null, { status: 404, headers: { 'x-vercel-id': '<script>' } })), () => runAttackChecks(config));
+  assert.equal(odd[0].observed, 'HTTP 404로 막힘', '모양이 이상한 요청 ID는 붙이지 않음');
 });

@@ -22,12 +22,15 @@ function deployedApp(config) {
   return app;
 }
 
-async function statusOf(url) {
+// 받은 응답의 상태와 Vercel 요청 ID(x-vercel-id)만 꺼냅니다. 응답이 없으면 null.
+const REQUEST_ID = /^[A-Za-z0-9:_-]{1,120}$/u;
+async function responseOf(url) {
   try {
     const response = await fetch(url, {
       redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
     });
-    return response.status;
+    const id = response.headers?.get?.('x-vercel-id') ?? '';
+    return { status: response.status, requestId: REQUEST_ID.test(id) ? id : null };
   } catch {
     return null;
   }
@@ -54,11 +57,23 @@ async function firstStageCheck(config, app) {
 
 // 12단계 심판 「실행 기록 대조」: 요청이 끝나지 않아(네트워크 차단·시간 초과 등) 받은 HTTP 상태가 없으면
 // 결과를 짐작하지 않고 정해진 미실행 표시 'not_run'만 적습니다. 상태를 받았으면 그 상태를 그대로 적습니다.
-const describe = (status, blockedStatus) => (status === null
-  ? 'not_run'
-  : status === blockedStatus ? `HTTP ${status}로 막힘` : `HTTP ${status} (기대와 다름)`);
+// 받은 응답이 있으면 그 응답의 요청 ID(x-vercel-id)도 그대로 붙입니다(심판 기록과 같은 요청인지 맞춰 볼 수 있게).
+const describe = (res, blockedStatus) => {
+  if (!res) return 'not_run';
+  const head = res.status === blockedStatus ? `HTTP ${res.status}로 막힘` : `HTTP ${res.status} (기대와 다름)`;
+  return res.requestId ? `${head} (요청 ID ${res.requestId})` : head;
+};
 
-const DEPLOY_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app$/u;
+// 허용하는 배포 주소: 이 저장소 프로젝트의 커밋별 Vercel 배포 주소(<저장소 이름>-<배포 해시>-<팀>.vercel.app)
+// 또는 aleph.config.json에 적힌 주소와 같은 호스트. 그 밖의 호스트는 받지 않습니다.
+const repoSlug = (config) => String(config.repoUrl ?? '').toLowerCase().replace(/\/+$/u, '').split('/').pop() ?? '';
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+function allowedDeployHost(config, app, hostname) {
+  if (hostname === app.hostname) return true;
+  const slug = repoSlug(config);
+  if (!/^[a-z0-9][a-z0-9-]{0,99}$/u.test(slug)) return false;
+  return new RegExp(`^${escapeRe(slug)}-[a-z0-9]{6,32}-[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.vercel\\.app$`, 'u').test(hostname);
+}
 const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string'
   && a.toLowerCase().replace(/\/+$/u, '') === b.toLowerCase().replace(/\/+$/u, '');
 
@@ -72,7 +87,7 @@ export async function deploymentTarget(config, app) {
     const url = new URL(identity?.publicAppUrl);
     if (identity?.schema !== 'aleph.defense.deployment.v1' || !sameRepo(identity.repoUrl, config.repoUrl)
         || url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password
-        || !DEPLOY_HOST.test(url.hostname)) return app;
+        || !allowedDeployHost(config, app, url.hostname)) return app;
     return url;
   } catch {
     return app;
@@ -92,9 +107,9 @@ export async function runAttackChecks(config) {
   const target = await deploymentTarget(config, app);
   // 점검마다 요청 하나씩, 차례대로 보냅니다(같은 순간에 섞여 들어가지 않게).
   const sampleId = '00000000-0000-4000-8000-000000000001';
-  const dataJson = await statusOf(new URL('/data.json', target));
-  const noteList = await statusOf(new URL('/api/notes', target));
-  const oneNote = await statusOf(new URL(`/api/notes/${sampleId}`, target));
+  const dataJson = await responseOf(new URL('/data.json', target));
+  const noteList = await responseOf(new URL('/api/notes', target));
+  const oneNote = await responseOf(new URL(`/api/notes/${sampleId}`, target));
   return [
     { attackId: 'anonymous_note_read', expected: '공개 data.json이 없어 404',
       observed: describe(dataJson, 404) },
