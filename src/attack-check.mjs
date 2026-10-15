@@ -23,11 +23,17 @@ function deployedApp(config) {
 }
 
 // 받은 응답의 HTTP 상태만 꺼냅니다. 응답이 없으면 null.
+// 12단계 심판 「실행 기록 대조」: 배포(Vercel)가 실제로 보낸 응답에는 항상 요청 ID 머리글 x-vercel-id가 붙습니다.
+// 이 머리글이 없는 응답(중간 장치·차단 장치가 대신 돌려준 응답 등)은 요청이 배포에 닿았는지 확인할 수 없으므로
+// 받은 응답으로 치지 않고 null(→ not_run)로 둡니다. 요청 ID 값 자체는 기록하지 않습니다.
+const VERCEL_REQUEST_ID = /^[a-z0-9]+::[A-Za-z0-9:_-]{6,120}$/u;
 async function responseOf(url) {
   try {
     const response = await fetch(url, {
       redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
     });
+    const requestId = response.headers?.get?.('x-vercel-id') ?? '';
+    if (!VERCEL_REQUEST_ID.test(requestId)) return null;
     return { status: response.status };
   } catch {
     return null;
