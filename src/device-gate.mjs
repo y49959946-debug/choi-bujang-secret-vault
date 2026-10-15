@@ -6,7 +6,8 @@
 //   3) 기기 세션이 없거나·만료·다른 사람 것·기기가 승인 상태가 아니면 403 DEVICE_NOT_APPROVED
 //   4) 메서드·경로·쿼리·본문 해시·시각·번호·세션에 대한 서명이 맞지 않으면 403 DEVICE_SIGNATURE_INVALID
 //   5) 같은 일회용 번호를 다시 쓰면 403 DEVICE_PROOF_REPLAYED
-// 로그인 토큰이 없거나 검증되지 않는 요청은 그대로 함수로 보내, 함수가 전처럼 401로 거부합니다(기존 결과 유지).
+// 로그인 토큰이 없는 요청은 그대로 함수로 보내, 함수가 전처럼 401로 거부합니다(기존 결과 유지).
+// 토큰 머리글이 있는데 검증되지 않으면 여기서 401 LOGIN_REQUIRED(확인 중 오류면 403 DEVICE_CHECK_FAILED)로 닫습니다(12단계 마무리).
 // 이 검사는 api/notes.js·api/restore.js(9단계 안전 정책 사본 대상)를 고치지 않고 그 앞에 붙습니다.
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
@@ -30,9 +31,18 @@ export function createDeviceGate({ env = process.env, verifyLogin = null, db = n
     const authorization = request.headers.get('authorization');
     if (!authorization) return null; // 토큰 없는 요청: 함수가 401
     verify ??= createLoginVerifier({ config, supabaseSecretKey: env.SUPABASE_SECRET_KEY });
+    // 12단계 마무리: 토큰 머리글이 있는데 여기서 확인하지 못한 요청은 함수로 넘기지 않고 여기서 닫습니다.
+    // 전에는 함수로 넘겨 401을 받게 했는데, 앞단의 확인만 실패하고 함수의 확인은 성공하면
+    // (공개키 목록 조회 일시 실패, 같은 머리글이 두 줄로 와서 앞단·함수가 다르게 읽는 경우 등)
+    // 기기 서명 없이 자료가 열렸습니다. 로컬 재현: test/monsters.test.mjs H16·H17.
     let identity = null;
-    try { identity = await verify(authorization); } catch { identity = null; }
-    if (!identity?.userId) return null; // 검증 안 되는 토큰: 함수가 401
+    try { identity = await verify(authorization); } catch {
+      return deny('DEVICE_CHECK_FAILED', request, url); // 확인 중 오류: 닫힘
+    }
+    if (!identity?.userId) {
+      log(`device: 거부 401 LOGIN_REQUIRED method=${request.method} path=${shapeOf(url.pathname)}`);
+      return Response.json({ error: 'LOGIN_REQUIRED' }, { status: 401, headers: { 'cache-control': 'no-store', 'www-authenticate': 'Bearer' } });
+    }
     const ownerKey = ownerKeyOf(identity);
 
     const proof = readProofHeaders((name) => request.headers.get(name));
