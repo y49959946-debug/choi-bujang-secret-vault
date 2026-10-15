@@ -1,11 +1,11 @@
-// 11단계 · Vercel 라우팅 미들웨어: 메모·복구 API 앞에서 승인된 기기의 요청 서명을 확인합니다.
+// 11단계 · Vercel 라우팅 미들웨어: 메모·복구·작전실(12단계) API 앞에서 승인된 기기의 요청 서명을 확인합니다.
 // 규칙은 src/device-gate.mjs, 서명 문자열은 src/device-proof.mjs에 있습니다.
 import { next } from '@vercel/functions';
 import { createDeviceGate } from './src/device-gate.mjs';
 
 export const config = {
   runtime: 'nodejs',
-  matcher: ['/api/notes', '/api/notes/:path*', '/api/notes.js', '/api/restore', '/api/restore/:path*', '/api/restore.js'],
+  matcher: ['/api/notes', '/api/notes/:path*', '/api/notes.js', '/api/restore', '/api/restore/:path*', '/api/restore.js', '/api/ops', '/api/ops/:path*', '/api/ops.js'],
 };
 
 const gate = createDeviceGate();

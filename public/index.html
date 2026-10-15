@@ -48,12 +48,26 @@
     .device[data-device="unverified"], .device[data-device="pending"] { border-color: #c9a35a; }
     .device[data-device="approved"] { border-color: #4fb39a; }
     .device[data-device="revoked"], .device[data-device="unsupported"] { border-color: #d07384; }
+    .ops { margin: 26px 0; padding: 18px 19px; border: 1px solid #51667c; border-radius: 14px; background: #16253a; }
+    .ops .hint { font-size: 14px; color: #bfd0e5; margin: 8px 0; }
+    .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+    .ops-card { border: 1px solid #51667c; border-radius: 12px; padding: 12px 14px; background: #1a2a3d; }
+    .ops-card h3 { margin: 0 0 8px; font-size: 16px; }
+    .ops-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 14px; margin: 4px 0; color: #bfd0e5; }
+    .ops-line b { color: #ecf4ff; }
+    .src { font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid #51667c; }
+    .src-db { border-color: #4fb39a; color: #9ee5d1; } .src-server_run { border-color: #8ad8df; color: #8ad8df; }
+    .src-build { color: #bfd0e5; } .src-not_run { border-color: #c9a35a; color: #ffe9c2; }
+    .ops table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    .ops caption { text-align: left; font-weight: 700; margin-bottom: 4px; }
+    .ops th, .ops td { border-bottom: 1px solid #2b3d52; padding: 4px 6px; text-align: left; overflow-wrap: anywhere; }
+    .ops details { margin-top: 12px; } .ops summary { cursor: pointer; color: #8ad8df; }
     .offline { margin: 0 0 18px; padding: 12px 16px; border-radius: 12px; border: 1px solid #c9a35a; background: #3b2f1544; color: #ffe9c2; font-size: 15px; }
   </style>
 </head>
 <body>
   <main>
-    <div class="eyebrow">BYTE BACK · 11단계 나만의 접속 앱</div>
+    <div class="eyebrow">BYTE BACK · 12단계 탈환 작전실</div>
     <h1>내 자료실</h1>
     <p class="offline" id="offline-banner" role="status" hidden>지금은 오프라인입니다. 메모는 기기에 저장해 두지 않으므로, 연결되어 서버가 로그인과 기기 승인을 다시 확인한 뒤에만 보입니다.</p>
     <p>메모는 서버 함수가 학습용 DB에서 읽어 옵니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
@@ -96,6 +110,16 @@
       </form>
       <p class="error" id="note-error" role="alert"></p>
     </section>
+    <section class="ops" id="ops" hidden aria-live="polite">
+      <h2>탈환 작전실</h2>
+      <p class="hint">서버 응답(<code>/api/ops</code>) 값만 보여 줍니다. 각 칸의 표시가 출처입니다 — <b>실제 기록</b>: 이번 요청에서 서버가 DB 기록을 읽어 셈, <b>서버 실행</b>: 서버가 판정기·탐지기 코드를 가상 입력으로 실행, <b>배포 고정 값</b>, <b>미실행</b>: 결과 없음(짐작으로 채우지 않음). 메모 본문·제목은 표시하지 않고, ID는 앞 8자리만 보입니다.</p>
+      <div class="row"><button type="button" id="ops-load" class="ghost">작전실 새로 읽기</button></div>
+      <p class="error" id="ops-error" role="alert"></p>
+      <p class="hint" id="ops-meta"></p>
+      <div class="ops-grid" id="ops-grid"></div>
+      <details id="ops-records"><summary>가린 서버 기록 보기(화면 수치와 대조)</summary><div id="ops-tables"></div></details>
+    </section>
+
     <ul id="notes" aria-live="polite"><li>로그인 상태를 확인하는 중입니다.</li></ul>
   </main>
   <script type="module">
@@ -162,7 +186,7 @@
         : '로그인하지 않았습니다.';
       form.hidden = Boolean(session);
       logoutButton.hidden = !session;
-      if (!session) { device.proof = null; setDeviceState('unverified', '확인되지 않음 — 로그인한 뒤 확인합니다'); }
+      if (!session) { device.proof = null; hideOps(); setDeviceState('unverified', '확인되지 않음 — 로그인한 뒤 확인합니다'); }
       deviceActions.hidden = !session;
       loadNotes(session);
     }
@@ -355,7 +379,7 @@
     const registerButton = document.querySelector('#device-register');
 
     function setDeviceState(state, text) { deviceBox.dataset.device = state; deviceText.textContent = text; }
-    function closeVault() { editor.hidden = true; showMessage('서버가 이 기기를 승인한 뒤에만 자료를 보여 줍니다. 위 「이 기기」 칸에서 확인해 주세요.'); }
+    function closeVault() { editor.hidden = true; hideOps(); showMessage('서버가 이 기기를 승인한 뒤에만 자료를 보여 줍니다. 위 「이 기기」 칸에서 확인해 주세요.'); }
     const PENDING_TEXT = (id) => `승인 대기 — 자료실 주인이 서버에서 승인하기 전에는 자료가 열리지 않습니다${id ? ` (기기 번호 앞자리 ${String(id).slice(0, 8)})` : ''}`;
 
     const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -429,6 +453,7 @@
         device.proof = { sessionId: done.data.sessionId, signer, expiresAt: done.data.expiresAt };
         setDeviceState('approved', '승인됨 — 서버가 이 기기를 등록 기기로 확인했습니다');
         loadNotes(session);
+        loadOps();
       } else if (done.status === 200 && done.data?.status === 'pending') {
         setDeviceState('pending', PENDING_TEXT(done.data.deviceId));
       } else if (done.status === 200 && done.data?.status === 'revoked') {
@@ -497,6 +522,70 @@
         ? '패스키(운영체제 인증 장치)'
         : '메모리 전용 키 — 이 기기에 패스키 인증 장치가 없어, 이 화면이 열려 있는 동안만 쓰는 키를 씁니다(새로고침하면 다시 승인 필요)';
     })();
+
+    // ----- 12단계: 탈환 작전실(서버 응답 값만 표시, 성공 문구를 근거로 쓰지 않음) -----
+    const opsBox = document.querySelector('#ops');
+    const opsGrid = document.querySelector('#ops-grid');
+    const opsTables = document.querySelector('#ops-tables');
+    const opsError = document.querySelector('#ops-error');
+    const opsMeta = document.querySelector('#ops-meta');
+    const opsLoad = document.querySelector('#ops-load');
+    const SOURCE_LABEL = { db: '실제 기록', server_run: '서버 실행', build: '배포 고정 값', not_run: '미실행' };
+    const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+    const badge = (source) => el('span', { className: `src src-${source}`, textContent: SOURCE_LABEL[source] ?? source });
+    const line = (label, value, source) => el('div', { className: 'ops-line' }, el('span', { textContent: label }), el('b', { textContent: String(value) }), source ? badge(source) : '');
+    function card(title, ...lines) { return el('article', { className: 'ops-card' }, el('h3', { textContent: title }), ...lines); }
+    function table(caption, columns, rows) {
+      const head = el('tr', {}, ...columns.map(([, label]) => el('th', { textContent: label })));
+      const body = rows.length ? rows.map((r) => el('tr', {}, ...columns.map(([key]) => el('td', { textContent: r[key] == null ? '-' : String(r[key]) }))))
+        : [el('tr', {}, el('td', { colSpan: columns.length, textContent: '기록 없음' }))];
+      return el('table', {}, el('caption', { textContent: caption }), el('thead', {}, head), el('tbody', {}, ...body));
+    }
+    function hideOps() { opsBox.hidden = true; opsGrid.replaceChildren(); opsTables.replaceChildren(); opsMeta.textContent = ''; }
+    async function loadOps() {
+      if (!device.proof) { hideOps(); return; }
+      opsBox.hidden = false; opsError.textContent = ''; opsLoad.disabled = true;
+      try {
+        const o = await api('/api/ops');
+        if (o?.schema !== 'byteback.ops.v1') throw new Error('작전실 응답 형식이 맞지 않습니다.');
+        const c = o.consistency ?? {};
+        const ok = (v) => (v === true ? '일치' : '불일치');
+        opsMeta.textContent = `배포 커밋 ${o.deployment?.commit7 ?? '-'} · 단계 ${o.deployment?.step} · 내 소유자 키 앞자리 ${o.owner8} · 읽은 시각 ${o.generatedAt}`;
+        opsGrid.replaceChildren(
+          card('판정기 규칙',
+            line('규칙 수(RULE_IDS)', o.decider.ruleCount, 'server_run'),
+            line('가상 요청 기대와 일치', `${o.decider.matched} / ${o.decider.total}`, 'server_run'),
+            el('p', { className: 'hint', textContent: o.decider.ruleIds.join(', ') })),
+          card('탐지 사건',
+            line('가상 사건 기대와 일치', `${o.detection.practice.matched} / ${o.detection.practice.total}`, 'server_run'),
+            line('운영 실제 사건', '결과 없음', o.detection.live.source),
+            el('p', { className: 'hint', textContent: o.detection.live.reason })),
+          card('회수 상태',
+            line('내 기기(전체)', o.revocation.counts.total, 'db'),
+            line('승인 대기 · 승인 · 회수', `${o.revocation.counts.pending} · ${o.revocation.counts.approved} · ${o.revocation.counts.revoked}`, 'db'),
+            line('유효한 기기 세션', o.revocation.activeSessions, 'db'),
+            line('탐지 → 회수 집행', '결과 없음', o.revocation.detectorLink.source)),
+          card('복구 버전',
+            line('정책 사본', `${o.restore.policyBaseline.id} (${o.restore.policyBaseline.commit7})`, 'build'),
+            line('정책 사본 파일 대조', '결과 없음', o.restore.policyBaseline.verification.source),
+            line('메모 사본 해시 일치', `${o.restore.backups.hashOk} / ${o.restore.backups.total}`, 'db'),
+            line('복구 감사 기록(실행 수)', `${o.restore.audit.total} (${o.restore.audit.runs})`, 'db'),
+            line('복원 성공 · 거부 · 실패', `${o.restore.audit.counts.restored} · ${o.restore.audit.counts.rejected} · ${o.restore.audit.counts.failed + o.restore.audit.counts.verify_failed}`, 'db'),
+            line('마지막 복구 기록', o.restore.audit.lastAt ?? '-', 'db')),
+          card('수치와 기록 대조(서버)',
+            line('기기', ok(c.devices)), line('복구 감사', ok(c.audit)), line('메모 사본', ok(c.backups)), line('판정기', ok(c.decider))),
+        );
+        opsTables.replaceChildren(
+          table('기기(회수 상태)', [['id8', 'ID 앞자리'], ['kind', '방식'], ['status', '상태'], ['createdAt', '요청'], ['approvedAt', '승인'], ['lastUsedAt', '마지막 사용']], o.revocation.records),
+          table('복구 감사 기록', [['at', '시각'], ['run8', '실행'], ['note8', '메모 ID 앞자리'], ['result', '결과'], ['reason', '사유']], o.restore.audit.records),
+          table('메모 사본', [['note8', '메모 ID 앞자리'], ['capturedAt', '저장 시각'], ['hashOk', '해시 일치']], o.restore.backups.records),
+          table('판정기 가상 요청', [['name', '요청'], ['expected', '기대'], ['actual', '실제'], ['match', '일치']], o.decider.probes),
+        );
+      } catch (error) {
+        opsError.textContent = error.message;
+      } finally { opsLoad.disabled = false; }
+    }
+    opsLoad.addEventListener('click', loadOps);
 
     // 처음 열 때: 보관된 로그인 정보가 있으면 이어서 씁니다.
     purgeLegacyStoredLogin();
