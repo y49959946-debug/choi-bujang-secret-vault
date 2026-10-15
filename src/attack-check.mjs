@@ -53,41 +53,10 @@ async function firstStageCheck(config, app) {
     observed: visible ? '비로그인 요청에서 공개 가상 메모 확인 표시가 보임' : `비로그인 요청에서 확인 표시가 보이지 않음 (HTTP ${response.status})` }];
 }
 
-// 12단계 심판 「실행 기록 대조」: 요청이 끝나지 않아(네트워크 차단·시간 초과 등) 받은 HTTP 상태가 없으면
-// 결과를 짐작하지 않고 정해진 미실행 표시 'not_run'만 적습니다. 상태를 받았으면 그 상태를 그대로 적습니다.
 // 12단계 심판 「실행 기록 대조」: observed에는 실제로 받은 HTTP 상태만 적습니다(예: "HTTP 404").
-// 기대와 같은지 다른지, 요청 ID 같은 다른 글은 붙이지 않습니다. 응답을 받지 못했으면 'not_run'.
+// 기대와 같은지 다른지, 요청 ID 같은 다른 글은 붙이지 않습니다. 응답을 받지 못했으면(네트워크 차단·시간 초과 등)
+// 결과를 짐작하지 않고 'not_run'만 적습니다.
 const describe = (res) => (res ? `HTTP ${res.status}` : 'not_run');
-
-// 허용하는 배포 주소: 이 저장소 프로젝트의 커밋별 Vercel 배포 주소(<저장소 이름>-<배포 해시>-<팀>.vercel.app)
-// 또는 aleph.config.json에 적힌 주소와 같은 호스트. 그 밖의 호스트는 받지 않습니다.
-const repoSlug = (config) => String(config.repoUrl ?? '').toLowerCase().replace(/\/+$/u, '').split('/').pop() ?? '';
-const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-function allowedDeployHost(config, app, hostname) {
-  if (hostname === app.hostname) return true;
-  const slug = repoSlug(config);
-  if (!/^[a-z0-9][a-z0-9-]{0,99}$/u.test(slug)) return false;
-  return new RegExp(`^${escapeRe(slug)}-[a-z0-9]{6,32}-[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.vercel\\.app$`, 'u').test(hostname);
-}
-const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string'
-  && a.toLowerCase().replace(/\/+$/u, '') === b.toLowerCase().replace(/\/+$/u, '');
-
-export async function deploymentTarget(config, app) {
-  try {
-    const response = await fetch(new URL('/aleph.json', app), {
-      redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) return app;
-    const identity = await response.json();
-    const url = new URL(identity?.publicAppUrl);
-    if (identity?.schema !== 'aleph.defense.deployment.v1' || !sameRepo(identity.repoUrl, config.repoUrl)
-        || url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password
-        || !allowedDeployHost(config, app, url.hostname)) return app;
-    return url;
-  } catch {
-    return app;
-  }
-}
 
 export async function runAttackChecks(config) {
   const app = deployedApp(config);
@@ -96,15 +65,13 @@ export async function runAttackChecks(config) {
     throw new Error('aleph.config.json의 step을 확인해 주세요.');
   }
 
-  // 12단계: 점검 대상은 심판이 확인하는 그 배포(빌드가 만든 /aleph.json의 publicAppUrl, 커밋마다 고유 주소)입니다.
-  // aleph.config.json의 publicAppUrl은 시작 틀 README가 말하는 "이전 방식의 자리표시자"라 고정 별칭일 수 있습니다.
-  // 같은 저장소의 배포 확인 파일일 때만 그 주소를 쓰고, 아니면 설정 주소를 그대로 씁니다.
-  const target = await deploymentTarget(config, app);
+  // 12단계 심판 「실행 기록 대조」: 세 점검은 제출한 배포 주소(aleph.config.json의 publicAppUrl,
+  // 제출 화면의 "내 배포 주소"와 같은 주소)로만 보냅니다. 다른 주소를 찾아 바꾸지 않습니다.
   // 점검마다 요청 하나씩, 차례대로 보냅니다(같은 순간에 섞여 들어가지 않게).
   const sampleId = '00000000-0000-4000-8000-000000000001';
-  const dataJson = await responseOf(new URL('/data.json', target));
-  const noteList = await responseOf(new URL('/api/notes', target));
-  const oneNote = await responseOf(new URL(`/api/notes/${sampleId}`, target));
+  const dataJson = await responseOf(new URL('/data.json', app));
+  const noteList = await responseOf(new URL('/api/notes', app));
+  const oneNote = await responseOf(new URL(`/api/notes/${sampleId}`, app));
   return [
     { attackId: 'anonymous_note_read', expected: '공개 data.json이 없어 404',
       observed: describe(dataJson) },

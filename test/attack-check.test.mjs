@@ -1,4 +1,4 @@
-// 12단계 · 자기 점검(src/attack-check.mjs): 점검 대상 주소, 차례대로 보내기, observed 칸(받은 상태 그대로 / 못 받으면 not_run)
+// 12단계 · 자기 점검(src/attack-check.mjs): 제출한 배포 주소로만, 세 요청을 차례대로, observed에는 받은 HTTP 상태만(못 받으면 not_run)
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -7,9 +7,8 @@ import { runAttackChecks } from '../src/attack-check.mjs';
 
 const repo = resolve(import.meta.dirname, '..');
 const config = JSON.parse(readFileSync(join(repo, 'aleph.config.json'), 'utf8'));
-const UNIQUE = 'https://choi-bujang-secret-vault-abc123-aleph-5.vercel.app';
+const SUBMITTED = new URL(config.publicAppUrl).origin;
 const withFetch = async (impl, fn) => { const real = globalThis.fetch; globalThis.fetch = impl; try { return await fn(); } finally { globalThis.fetch = real; } };
-const identity = (over = {}) => Response.json({ schema: 'aleph.defense.deployment.v1', repoUrl: config.repoUrl, publicAppUrl: UNIQUE, ...over });
 
 test('요청이 끝나지 않으면(네트워크 차단) 세 점검 모두 observed 가 not_run 이다', async () => {
   const rows = await withFetch(async () => { throw new TypeError('fetch failed'); }, () => runAttackChecks(config));
@@ -17,54 +16,33 @@ test('요청이 끝나지 않으면(네트워크 차단) 세 점검 모두 obser
   for (const r of rows) assert.equal(r.observed, 'not_run');
 });
 
-test('같은 저장소의 /aleph.json 이 알려 주는 배포 주소로, 점검마다 하나씩 차례대로 보내고 받은 상태를 적는다', async () => {
+test('제출한 배포 주소로 세 GET 요청만, 하나씩 차례대로 보내고 받은 HTTP 상태만 적는다', async () => {
   const sent = [];
   let inFlight = 0; let maxInFlight = 0;
   const rows = await withFetch(async (url, init) => {
     const u = new URL(url);
-    if (u.pathname === '/aleph.json') return identity();
     inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
-    sent.push({ origin: u.origin, path: u.pathname, credentials: init?.credentials });
+    sent.push({ origin: u.origin, path: u.pathname, search: u.search, method: init?.method ?? 'GET', credentials: init?.credentials });
     await new Promise((r) => setTimeout(r, 5));
     inFlight -= 1;
-    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401 });
+    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401, headers: { 'x-vercel-id': 'icn1::abc12-1' } });
   }, () => runAttackChecks(config));
-  assert.deepEqual(sent.map((s) => s.path), ['/data.json', '/api/notes', '/api/notes/00000000-0000-4000-8000-000000000001']);
-  for (const s of sent) { assert.equal(s.origin, UNIQUE); assert.equal(s.credentials, 'omit'); }
+  assert.deepEqual(sent.map((s) => s.path), ['/data.json', '/api/notes', '/api/notes/00000000-0000-4000-8000-000000000001'], '다른 요청(/aleph.json 등)을 보내지 않음');
+  for (const s of sent) { assert.equal(s.origin, SUBMITTED); assert.equal(s.search, ''); assert.equal(s.method, 'GET'); assert.equal(s.credentials, 'omit'); }
   assert.equal(maxInFlight, 1, '동시에 둘 이상 보내지 않음');
   assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'HTTP 401', 'HTTP 401']);
 });
 
-test('다른 저장소이거나 모양이 틀린 /aleph.json 이면 설정 주소를 그대로 쓴다', async () => {
-  for (const bad of [identity({ repoUrl: 'https://github.com/someone/else' }), identity({ publicAppUrl: 'https://evil.example' }),
-    identity({ publicAppUrl: 'https://evil.vercel.app' }), identity({ publicAppUrl: 'https://other-app-5s51eqij3-aleph-5.vercel.app' }),
-    identity({ publicAppUrl: 'https://choi-bujang-secret-vault-5s51eqij3-aleph-5.vercel.app.evil.com' }),
-    identity({ schema: 'x' }), new Response('nope', { status: 404 })]) {
-    const origins = new Set();
-    await withFetch(async (url) => {
-      const u = new URL(url);
-      if (u.pathname === '/aleph.json') return bad.clone();
-      origins.add(u.origin); return new Response(null, { status: 401 });
-    }, () => runAttackChecks(config));
-    assert.deepEqual([...origins], [new URL(config.publicAppUrl).origin]);
-  }
-});
-
-test('기대와 다른 상태도 받은 그대로 적는다', async () => {
-  const rows = await withFetch(async (url) => (new URL(url).pathname === '/aleph.json' ? identity() : new Response(null, { status: 200 })), () => runAttackChecks(config));
+test('기대와 다른 상태도 받은 그대로, 다른 글 없이 적는다', async () => {
+  const rows = await withFetch(async () => new Response(null, { status: 200 }), () => runAttackChecks(config));
   for (const r of rows) assert.equal(r.observed, 'HTTP 200');
+  for (const r of rows) assert.match(r.observed, /^(HTTP [1-5]\d\d|not_run)$/u);
 });
 
-test('실제 커밋별 배포 주소 모양을 받아들이고, observed에는 받은 HTTP 상태 말고 다른 글을 붙이지 않는다', async () => {
-  const real = 'https://choi-bujang-secret-vault-5s51eqij3-aleph-5.vercel.app';
-  const origins = new Set();
+test('일부만 응답을 받으면 받은 것만 상태로, 못 받은 것은 not_run', async () => {
   const rows = await withFetch(async (url) => {
-    const u = new URL(url);
-    if (u.pathname === '/aleph.json') return identity({ publicAppUrl: real });
-    origins.add(u.origin);
-    return new Response(null, { status: u.pathname === '/data.json' ? 404 : 401, headers: { 'x-vercel-id': 'icn1::abc12-1' } });
+    if (new URL(url).pathname === '/api/notes') throw new TypeError('timeout');
+    return new Response(null, { status: new URL(url).pathname === '/data.json' ? 404 : 401 });
   }, () => runAttackChecks(config));
-  assert.deepEqual([...origins], [real]);
-  for (const r of rows) assert.match(r.observed, /^(HTTP [1-5]\d\d|not_run)$/u);
-  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'HTTP 401', 'HTTP 401']);
+  assert.deepEqual(rows.map((r) => r.observed), ['HTTP 404', 'not_run', 'HTTP 401']);
 });
