@@ -58,6 +58,27 @@ const describe = (status, blockedStatus) => (status === null
   ? 'not_run'
   : status === blockedStatus ? `HTTP ${status}로 막힘` : `HTTP ${status} (기대와 다름)`);
 
+const DEPLOY_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app$/u;
+const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string'
+  && a.toLowerCase().replace(/\/+$/u, '') === b.toLowerCase().replace(/\/+$/u, '');
+
+export async function deploymentTarget(config, app) {
+  try {
+    const response = await fetch(new URL('/aleph.json', app), {
+      redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return app;
+    const identity = await response.json();
+    const url = new URL(identity?.publicAppUrl);
+    if (identity?.schema !== 'aleph.defense.deployment.v1' || !sameRepo(identity.repoUrl, config.repoUrl)
+        || url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password
+        || !DEPLOY_HOST.test(url.hostname)) return app;
+    return url;
+  } catch {
+    return app;
+  }
+}
+
 export async function runAttackChecks(config) {
   const app = deployedApp(config);
   if (config.step === 1) return firstStageCheck(config, app);
@@ -65,12 +86,15 @@ export async function runAttackChecks(config) {
     throw new Error('aleph.config.json의 step을 확인해 주세요.');
   }
 
+  // 12단계: 점검 대상은 심판이 확인하는 그 배포(빌드가 만든 /aleph.json의 publicAppUrl, 커밋마다 고유 주소)입니다.
+  // aleph.config.json의 publicAppUrl은 시작 틀 README가 말하는 "이전 방식의 자리표시자"라 고정 별칭일 수 있습니다.
+  // 같은 저장소의 배포 확인 파일일 때만 그 주소를 쓰고, 아니면 설정 주소를 그대로 씁니다.
+  const target = await deploymentTarget(config, app);
+  // 점검마다 요청 하나씩, 차례대로 보냅니다(같은 순간에 섞여 들어가지 않게).
   const sampleId = '00000000-0000-4000-8000-000000000001';
-  const [dataJson, noteList, oneNote] = await Promise.all([
-    statusOf(new URL('/data.json', app)),
-    statusOf(new URL('/api/notes', app)),
-    statusOf(new URL(`/api/notes/${sampleId}`, app)),
-  ]);
+  const dataJson = await statusOf(new URL('/data.json', target));
+  const noteList = await statusOf(new URL('/api/notes', target));
+  const oneNote = await statusOf(new URL(`/api/notes/${sampleId}`, target));
   return [
     { attackId: 'anonymous_note_read', expected: '공개 data.json이 없어 404',
       observed: describe(dataJson, 404) },
