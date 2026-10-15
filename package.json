@@ -20,7 +20,8 @@
     "test:app": "node --test test/app-shell.test.mjs",
     "test:device": "node --test test/device.test.mjs",
     "test:ops": "node --test test/ops.test.mjs",
-    "test:live": "node --test test/live-catalog.test.mjs"
+    "test:live": "node --test test/live-catalog.test.mjs",
+    "test:guide": "node --test test/readme-guide.test.mjs"
   },
   "engines": {
     "node": ">=22"
