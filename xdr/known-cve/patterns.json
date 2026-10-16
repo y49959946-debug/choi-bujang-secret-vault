@@ -1,0 +1,53 @@
+{
+  "schema": "byteback.xdr.patterns.v1",
+  "moduleKey": "known-cve",
+  "basis": "CVE-2021-44228 Apache Log4j2 JNDI 원격 조회 취약점 (https://nvd.nist.gov/vuln/detail/CVE-2021-44228) + MITRE ATT&CK T1190 Exploit Public-Facing Application (https://attack.mitre.org/techniques/T1190/)",
+  "note": "알려진 공격 형태만 적습니다. 막을지 알릴지를 정하는 기준 숫자는 decide.mjs에서 정합니다. 이 파일에는 실제 공격 문자열을 적지 않고, 경보 원본도 고치지 않습니다. 'CVE-2021-44228'이나 'jndi'라는 글자만 있는 경우, 잘린 조회 조각, 중괄호 하나는 원격 조회 구문이 아니므로 어느 패턴에도 해당하지 않습니다. 점검 도구 흔적은 T1190 페이지가 직접 다루지 않아 같은 MITRE ATT&CK의 T1595.002를 함께 근거로 듭니다.",
+  "patterns": [
+    {
+      "id": "kc.jndi_lookup_in_header",
+      "name": "요청 머리글 안의 원격 조회 구문(jndi 형태)",
+      "technique": "T1190",
+      "cve": "CVE-2021-44228",
+      "fields": [
+        "data.useragent",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
+      "condition": "요청 머리글(data.useragent 등)에 jndi 조회 표기와 원격 주소(ldap 등 프로토콜)가 붙은 완전한 원격 조회 구문이 있다(설명의 'CVE-2021-44228 형태'·'머리글에 원격 조회 구문', 여러 머리글이면 data.count).",
+      "evidence": "CVE-2021-44228: 설정·로그 메시지·인자에 쓰인 JNDI 기능이 공격자가 정한 LDAP 등 원격 지점을 막지 못한다(\"JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP\", https://nvd.nist.gov/vuln/detail/CVE-2021-44228), T1190 사례에 이 취약점 악용이 있다(\"CVE-2021-44228 in Log4j\", https://attack.mitre.org/techniques/T1190/)."
+    },
+    {
+      "id": "kc.jndi_lookup_in_request_param",
+      "name": "요청 인자 안의 원격 조회 구문(jndi 형태)",
+      "technique": "T1190",
+      "cve": "CVE-2021-44228",
+      "fields": [
+        "data.url",
+        "data.srcip",
+        "data.count",
+        "rule.level",
+        "rule.description"
+      ],
+      "condition": "요청 주소의 인자(data.url의 ? 뒤)에 jndi 조회 표기와 원격 주소가 붙은 완전한 원격 조회 구문이 있고, 같은 data.srcip에서 반복되면 더 강하다(설명의 '주소 인자에 원격 조회 구문'·'N번 반복', data.count).",
+      "evidence": "CVE-2021-44228: 로그에 남는 인자(parameters)의 JNDI 조회로 원격 LDAP 지점의 코드가 실행될 수 있다(\"JNDI features used in configuration, log messages, and parameters\", https://nvd.nist.gov/vuln/detail/CVE-2021-44228), T1190 탐지 안내는 접근 로그의 공격형 입력을 본다(\"suspicious requests in access logs\", https://attack.mitre.org/techniques/T1190/)."
+    },
+    {
+      "id": "kc.vuln_scanner_trace_with_lookup",
+      "name": "알려진 취약점 점검 도구의 흔적",
+      "technique": "T1595.002",
+      "cve": "CVE-2021-44228",
+      "fields": [
+        "data.url",
+        "data.useragent",
+        "data.srcip",
+        "rule.level",
+        "rule.description"
+      ],
+      "condition": "알려진 취약점 점검 도구의 흔적(설명의 '알려진 취약점 점검 흔적', 점검용 인자)이 위 원격 조회 구문과 같은 요청에 함께 있다. 점검 도구와 비슷한 이름만 있고 조회 구문이 없으면 해당하지 않는다.",
+      "evidence": "T1595.002 Vulnerability Scanning: 공격자는 노릴 대상의 취약점을 찾으려 점검한다(\"Adversaries may scan victims for vulnerabilities that can be used during targeting.\", https://attack.mitre.org/techniques/T1595/002/), T1190 탐지 안내는 공개 지점에 대한 비정상 요청 패턴을 본다(\"abnormal request patterns to public endpoint\", https://attack.mitre.org/techniques/T1190/)."
+    }
+  ]
+}
