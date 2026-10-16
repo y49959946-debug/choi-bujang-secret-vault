@@ -1,0 +1,32 @@
+{
+  "schema": "byteback.xdr.patterns.v1",
+  "moduleKey": "exfiltration",
+  "basis": "MITRE ATT&CK T1041 Exfiltration Over C2 Channel (https://attack.mitre.org/techniques/T1041/), T1048 Exfiltration Over Alternative Protocol (https://attack.mitre.org/techniques/T1048/)",
+  "note": "알려진 공격 형태만 적습니다. 막을지 알릴지를 정하는 기준 숫자(대용량 기준 등)는 decide.mjs에서 정하며, 이 파일은 경보 원본을 고치지 않습니다. 압축과 업무 시간 밖 전송은 ATT&CK에서 T1560(Archive Collected Data)·T1029(Scheduled Transfer)가 더 좁은 기법이지만, 이 과제의 근거 범위인 T1048로 적습니다.",
+  "patterns": [
+    {
+      "id": "ex.large_to_new_destination",
+      "name": "처음 보는 목적지로 대용량 전송",
+      "technique": "T1048",
+      "fields": ["data.dstip", "data.bytes", "data.files", "rule.level", "rule.description"],
+      "condition": "처음 보거나 평소 쓰지 않던 목적지·포트로 큰 전송량(data.bytes)이나 많은 파일(data.files)이 나간다. 평소 목적지·수업 자료 주소로 가는 작은 전송은 해당하지 않는다.",
+      "evidence": "T1048 Exfiltration Over Alternative Protocol: 공격자는 기존 명령 통로와 다른 프로토콜·목적지로 자료를 빼낸다 (https://attack.mitre.org/techniques/T1048/)."
+    },
+    {
+      "id": "ex.archive_off_hours",
+      "name": "업무 시간 밖 압축 파일 반출",
+      "technique": "T1048",
+      "fields": ["timestamp", "data.dstip", "data.bytes", "data.files", "rule.description"],
+      "condition": "압축 파일이 업무·수업 시간 밖이나 처음 보는 주소로 크게 나간다. 압축 파일을 만들기만 하고 외부 전송이 없으면 해당하지 않는다.",
+      "evidence": "T1048 Exfiltration Over Alternative Protocol: 빼낸 자료를 묶어 평소와 다른 경로로 내보내는 반출 형태다 (https://attack.mitre.org/techniques/T1048/)."
+    },
+    {
+      "id": "ex.repeated_over_c2",
+      "name": "명령 통로로 반복되는 대용량 전송",
+      "technique": "T1041",
+      "fields": ["data.dstip", "data.bytes", "data.count", "rule.level", "rule.description"],
+      "condition": "같은 목적지나 명령 통로로 큰 전송이 짧은 시간에 여러 번 반복되거나, 자료실 전체처럼 많은 자료가 한 번에 외부로 복사된다.",
+      "evidence": "T1041 Exfiltration Over C2 Channel: 공격자는 이미 쓰고 있는 명령·제어 통로로 훔친 자료를 빼낸다 (https://attack.mitre.org/techniques/T1041/)."
+    }
+  ]
+}
