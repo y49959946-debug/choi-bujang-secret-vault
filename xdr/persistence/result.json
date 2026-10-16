@@ -1,0 +1,155 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "persistence",
+  "decisions": [
+    {
+      "alertId": "ps-01",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "서명 없는 새 서비스 등록·서비스 실행 파일 변경(T1543.003): 서명 없음, 임시 폴더 실행 파일, 수준 12"
+    },
+    {
+      "alertId": "ps-02",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "낯선 예약 작업(T1053.005): 처음 봄, 수업 시간 밖 실행, 임시 폴더 실행 파일, 수준 12"
+    },
+    {
+      "alertId": "ps-03",
+      "action": "block",
+      "confidence": 0.87,
+      "reason": "시작 폴더 변경(T1547.001): 평소 목록에 없음, 수준 11"
+    },
+    {
+      "alertId": "ps-04",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "서명 없는 새 서비스 등록·서비스 실행 파일 변경(T1543.003): 서명 없음, 3건 반복, 수준 12"
+    },
+    {
+      "alertId": "ps-05",
+      "action": "block",
+      "confidence": 0.89,
+      "reason": "낯선 예약 작업(T1053.005): 임의 이름, 임시 폴더 실행 파일, 수준 10"
+    },
+    {
+      "alertId": "ps-06",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "서명 없는 새 서비스 등록·서비스 실행 파일 변경(T1543.003): 서명 없음, 임시 폴더 실행 파일, 수준 12"
+    },
+    {
+      "alertId": "ps-07",
+      "action": "block",
+      "confidence": 0.9,
+      "reason": "낯선 예약 작업(T1053.005) + 시작 폴더 변경(T1547.001): 임시 폴더 실행 파일, 예약 작업과 시작 항목이 함께 가리킴, 수준 11"
+    },
+    {
+      "alertId": "ps-08",
+      "action": "block",
+      "confidence": 0.91,
+      "reason": "서명 없는 새 서비스 등록·서비스 실행 파일 변경(T1543.003): 평소 목록에 없음, 임시 폴더 실행 파일, 수준 12"
+    },
+    {
+      "alertId": "ps-09",
+      "action": "alert",
+      "confidence": 0.58,
+      "reason": "낯선 예약 작업 의심: 위험 신호 없음, 수준 6 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-10",
+      "action": "alert",
+      "confidence": 0.61,
+      "reason": "시작 폴더 변경 의심: 위험 신호 없음, 수준 7 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-11",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "지속성 장치가 확인되지 않은 지속성 기법 경보: 위험 신호 없음, 수준 5 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-12",
+      "action": "alert",
+      "confidence": 0.58,
+      "reason": "낯선 예약 작업 의심: 위험 신호 없음, 수준 6 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-13",
+      "action": "alert",
+      "confidence": 0.66,
+      "reason": "지속성 장치가 확인되지 않은 지속성 기법 경보: 위험 신호 임시 폴더 실행 파일, 수준 8 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-14",
+      "action": "alert",
+      "confidence": 0.58,
+      "reason": "시작 폴더 변경 의심: 위험 신호 없음, 수준 6 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-15",
+      "action": "alert",
+      "confidence": 0.61,
+      "reason": "낯선 예약 작업 의심: 위험 신호 없음, 수준 7 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-16",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "지속성 장치가 확인되지 않은 지속성 기법 경보: 위험 신호 없음, 수준 5 — 막기 기준 미달"
+    },
+    {
+      "alertId": "ps-17",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "정상 활동: 지속성 기법 표시 없음, 수준 3"
+    },
+    {
+      "alertId": "ps-18",
+      "action": "record",
+      "confidence": 0.15,
+      "reason": "정상 활동: 평소 상태의 서비스·예약 작업, 위험 신호 없음, 수준 2"
+    },
+    {
+      "alertId": "ps-19",
+      "action": "record",
+      "confidence": 0.15,
+      "reason": "정상 활동: 평소 상태의 서비스·예약 작업, 위험 신호 없음, 수준 3"
+    },
+    {
+      "alertId": "ps-20",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "정상 활동: 지속성 기법 표시 없음, 수준 2"
+    },
+    {
+      "alertId": "ps-21",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "정상 활동: 지속성 기법 표시 없음, 수준 3"
+    },
+    {
+      "alertId": "ps-22",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "정상 활동: 지속성 기법 표시 없음, 수준 3"
+    },
+    {
+      "alertId": "ps-23",
+      "action": "record",
+      "confidence": 0.15,
+      "reason": "정상 활동: 평소 상태의 서비스·예약 작업, 위험 신호 없음, 수준 2"
+    },
+    {
+      "alertId": "ps-24",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "정상 활동: 지속성 기법 표시 없음, 수준 3"
+    }
+  ],
+  "counts": {
+    "block": 8,
+    "alert": 8,
+    "record": 8
+  }
+}
