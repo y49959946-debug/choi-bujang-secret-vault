@@ -1,0 +1,32 @@
+{
+  "schema": "byteback.xdr.patterns.v1",
+  "moduleKey": "privilege",
+  "basis": "MITRE ATT&CK T1078 Valid Accounts (https://attack.mitre.org/techniques/T1078/), T1068 Exploitation for Privilege Escalation (https://attack.mitre.org/techniques/T1068/)",
+  "note": "알려진 공격 형태만 적습니다. 막을지 알릴지를 정하는 기준 숫자는 decide.mjs에서 정하며, 이 파일은 경보 원본을 고치지 않습니다. 관리자 그룹 추가는 ATT&CK에서 T1098.007(Additional Local or Domain Groups)이 더 좁은 기법이지만, 이 과제의 근거 범위인 T1078로 적습니다.",
+  "patterns": [
+    {
+      "id": "pv.admin_group_add",
+      "name": "평범한 계정의 관리자 그룹 추가",
+      "technique": "T1078",
+      "fields": ["data.group", "data.count", "rule.level", "rule.description"],
+      "condition": "평범한 계정이 관리자 그룹(administrators)에 추가되거나, 빠졌던 계정이 곧바로 다시 들어오거나, 한 주소에서 여러 계정이 관리자 그룹에 추가된다. 관리자 그룹이 아닌 과제·수업 그룹은 해당하지 않는다.",
+      "evidence": "T1078 Valid Accounts: 공격자는 정상 계정의 자격 증명을 얻어 쓰며, 이를 권한 상승에도 이용한다 (https://attack.mitre.org/techniques/T1078/)."
+    },
+    {
+      "id": "pv.unfamiliar_admin_command",
+      "name": "갑자기 얻은 권한으로 실행한 처음 보는 관리자 명령",
+      "technique": "T1068",
+      "fields": ["rule.level", "rule.description"],
+      "condition": "방금 관리자가 된 계정이나 다른 계정의 권한, 처음 보는 주소에서 관리자 명령을 실행하거나, 세션이 관리자 권한으로 바뀐다. 취소되거나 실패한 한 번의 시도는 해당하지 않는다.",
+      "evidence": "T1068 Exploitation for Privilege Escalation: 공격자는 약점을 악용해 권한을 높인 뒤 높은 권한으로 명령을 실행한다 (https://attack.mitre.org/techniques/T1068/)."
+    },
+    {
+      "id": "pv.off_hours_privilege_use",
+      "name": "업무 시간 밖 권한 사용",
+      "technique": "T1078",
+      "fields": ["timestamp", "rule.level", "rule.description"],
+      "condition": "수업·업무 시간 밖이나 업무처럼 보이지 않는 시각에 관리자 그룹 추가나 관리자 명령이 일어난다.",
+      "evidence": "T1078 Valid Accounts 탐지 안내: 계정이 평소와 다른 시각·위치에서 쓰이는 비정상 접근을 살핀다 (https://attack.mitre.org/techniques/T1078/)."
+    }
+  ]
+}
